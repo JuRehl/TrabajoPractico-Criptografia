@@ -1,0 +1,11 @@
+{
+  "degree": "Grado de ejemplo",
+  "subjects": [
+    {"code": "CRIPTO", "name": "Criptografía y Seguridad Informática", "credits": 6},
+    {"code": "REDES", "name": "Redes de Ordenadores", "credits": 6},
+    {"code": "BBDD", "name": "Bases de Datos", "credits": 6},
+    {"code": "SOFT", "name": "Dirección de Proyectos de Software", "credits": 6},
+    {"code": "OPER", "name": "Gestión de Operaciones", "credits": 6},
+    {"code": "TFG", "name": "Trabajo Fin de Grado", "credits": 12}
+  ]
+}
