@@ -73,6 +73,9 @@ class UserService:
     def get(self, username: str) -> dict | None:
         return self._all().get(username)
 
+    def usernames(self) -> list[str]:
+        return sorted(self._all())
+
     # --- registro -------------------------------------------------------
     def register(self, username: str, password: str) -> None:
         validate_username(username)
@@ -139,3 +142,4 @@ class UserService:
             raise ValidationError("Usuario inexistente")
         users[username]["enrollment"] = signature_b64
         self.store.save(users)
+
