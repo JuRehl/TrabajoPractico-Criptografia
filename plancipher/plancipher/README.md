@@ -28,12 +28,26 @@ python -m plancipher pending alice
 Para scripts: `PLANCIPHER_PASSWORD`, `PLANCIPHER_SECRETARIA_PASS`, `PLANCIPHER_DATA`, `PLANCIPHER_TRUST_FP`.
 Códigos de salida: `0` OK, `1` error controlado, `3` datos **rechazados** por integridad.
 
+## Interfaz web (opcional, Streamlit)
+
+```bash
+pip install -r requirements-web.txt
+streamlit run app.py --server.address 127.0.0.1
+```
+
+Usa exactamente los mismos servicios y la misma criptografía que la CLI; `app.py` solo hace entrada/salida.
+Pestaña **Estudiante** (registro, login, planning, notas verificadas, pendientes) y pestaña **Secretaría**
+(inicializar, firmar matrículas, emitir notas). Las sesiones viven en la memoria del servidor y se descartan al
+cerrar sesión. Es una demo **local**: Streamlit no aporta TLS, por lo que no debe exponerse en red
+(limitación a mencionar en la memoria). Tras instalar, fija la versión exacta con `pip freeze | grep -i streamlit`.
+
 ## Estructura
 
 ```
 plancipher/crypto/   solo criptografía: kdf, aead, hybrid, signing, keystore, certs, encoding
 plancipher/          lógica: auth, planning, academic (matrícula/plan/notas), secretaria, storage
-plancipher/cli.py    solo entrada/salida
+plancipher/cli.py    solo entrada/salida (CLI)
+app.py               solo entrada/salida (web Streamlit, opcional)
 tests/               unittest: crypto, auth, planning, academic, cli (extremo a extremo)
 ```
 
