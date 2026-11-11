@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X
 from .crypto import aead, hybrid, kdf
 from .crypto.encoding import b64d, b64e
 from .errors import AuthenticationError, IntegrityError, LockedError, ValidationError
+from .password_policy import is_common_password
 from .storage import JsonStore
 
 log = logging.getLogger("plancipher.auth")
@@ -55,6 +56,8 @@ def validate_password(username: str, password: str) -> None:
         raise ValidationError("La contraseña no puede contener el nombre de usuario")
     if len(set(password)) < 5:
         raise ValidationError("La contraseña es demasiado repetitiva")
+    if is_common_password(password):
+        raise ValidationError("La contraseña es demasiado común (aparece en listas de diccionario)")
 
 
 class UserService:
@@ -142,4 +145,3 @@ class UserService:
             raise ValidationError("Usuario inexistente")
         users[username]["enrollment"] = signature_b64
         self.store.save(users)
-

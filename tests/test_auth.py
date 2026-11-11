@@ -40,6 +40,14 @@ class AuthTests(TmpDirCase):
             with self.assertRaises(ValidationError, msg=pw):
                 self.users.register("bob", pw)
 
+    def test_common_passwords_rejected_even_with_variations(self):
+        for pw in ("Password12345678", "contraseña-2026!!", "123456789012", "QWERTYUIOP-1234", "Bienvenido_2026_x"):
+            with self.assertRaises(ValidationError, msg=pw):
+                self.users.register("bob", pw)
+
+    def test_strong_passphrase_is_not_flagged_as_common(self):
+        self.users.register("bob", "caballo-grapa-verde-77")  # no lanza
+
     def test_duplicate_user(self):
         with self.assertRaises(ValidationError):
             self.users.register("alice", "otra-contrasena-123")

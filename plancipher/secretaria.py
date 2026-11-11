@@ -13,6 +13,7 @@ from .crypto import certs, keystore, signing
 from .crypto.encoding import b64d, b64e, canonical
 from .crypto.kdf import KdfParams
 from .errors import AuthenticationError, IntegrityError, ValidationError
+from .password_policy import is_common_password
 from .storage import JsonStore, ensure_dir
 
 log = logging.getLogger("plancipher.secretaria")
@@ -59,6 +60,8 @@ class Secretaria:
     def init(data_dir: Path, passphrase: str, params: KdfParams = KdfParams()) -> str:
         if len(passphrase) < MIN_PASSPHRASE:
             raise ValidationError(f"La passphrase debe tener al menos {MIN_PASSPHRASE} caracteres")
+        if is_common_password(passphrase):
+            raise ValidationError("La passphrase es demasiado común (aparece en listas de diccionario)")
         sdir = ensure_dir(Path(data_dir) / "secretaria")
         key_store = JsonStore(sdir / "signing_key.json")
         if key_store.path.exists():

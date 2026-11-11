@@ -8,7 +8,7 @@ Aplicación de línea de comandos para que los estudiantes consulten su **planni
 ```bash
 python3 -m venv .venv && source .venv/bin/activate   # Python >= 3.10
 pip install -r requirements.txt                       # cryptography==50.0.2
-python -m unittest discover -s tests -t .             # 68 pruebas, positivas y negativas
+python -m unittest discover -s tests -t .             # 71 pruebas, positivas y negativas
 bash scripts/demo.sh                                  # demo completa con manipulaciones
 ```
 
@@ -55,13 +55,13 @@ tests/               unittest: crypto, auth, planning, academic, cli (extremo a 
 
 | Función | Mecanismo | Parámetros / motivo |
 |---|---|---|
-| Contraseñas | scrypt + HKDF-SHA256 | n=2^17, r=8, p=1 (~128 MiB), sal de 128 bits por usuario. Una sola ejecución de scrypt; HKDF separa el **verificador** (se guarda) de la **KEK** (no se guarda). Comparación en tiempo constante. |
+| Contraseñas | scrypt + HKDF-SHA256 | n=2^17, r=8, p=1 (~128 MiB), sal de 128 bits por usuario. Una sola ejecución de scrypt; HKDF separa el **verificador** (se guarda) de la **KEK** (no se guarda). Comparación en tiempo constante. Política: mínimo 12 caracteres y rechazo de contraseñas de diccionario (también variantes como `Password12345678`). |
 | Cifrado de datos | AES-256-GCM (AEAD) | Nonce aleatorio de 96 bits por cifrado; clave de contenido (CEK) aleatoria por registro; AAD con id y propietario/destinatario. |
 | Claves de usuario | X25519 | La privada se guarda cifrada con la KEK (AES-GCM, AAD = usuario). |
 | Entrega de CEK al estudiante | ECIES: X25519 efímero + HKDF-SHA256 + AES-256-GCM | La secretaría solo necesita la clave pública del estudiante. |
 | Integridad | AES-GCM (tag) en datos privados; ECDSA en datos públicos | No se usa HMAC separado porque AEAD ya autentica. |
 | Firma digital | ECDSA P-256 + SHA-256 | Firma matrículas, plan de estudios y notas (sobre cabecera + clave sellada + cifrado). Separación de dominios en el mensaje firmado. |
-| Clave de firma | scrypt + AES-256-GCM con passphrase | Nunca en claro en disco; certificado X.509 autofirmado como ancla de confianza. |
+| Clave de firma | scrypt + AES-256-GCM con passphrase | Nunca en claro en disco; certificado X.509 autofirmado como ancla de confianza. Al cargarlo se validan fechas, autofirma, `basicConstraints` (CA), `keyUsage` (firma de datos y de certificados), curva y huella opcional. |
 
 Aleatoriedad: siempre `os.urandom` (CSPRNG del sistema). No hay claves, IVs ni nonces constantes.
 
@@ -83,7 +83,8 @@ y bloqueo exponencial tras 5 fallos.
 
 ## Limitaciones conocidas (para la memoria / defensa)
 
-* Ancla de confianza autofirmada: en producción, una PKI con CA raíz/intermedia y revocación.
+* Ancla de confianza autofirmada de un solo nivel y sin revocación (CRL/OCSP): en producción, una PKI con CA raíz e intermedias y consulta del estado del certificado.
+* La lista de contraseñas comunes es corta; en producción se usaría una lista grande de contraseñas filtradas.
 * Un atacante con escritura en disco puede **borrar** el último registro (rollback por borrado) sin que se detecte;
   se resolvería con un contador/manifiesto firmado.
 * Sin bloqueo de ficheros entre procesos concurrentes (escritura atómica, pero last-write-wins).

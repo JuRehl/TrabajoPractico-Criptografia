@@ -169,6 +169,25 @@ class CertTests(unittest.TestCase):
         with self.assertRaises(IntegrityError):
             certs.load_trusted(b"no es un certificado")
 
+    def _cert(self, *, ca=True, digital_signature=True, key_cert_sign=True, with_extensions=True):
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "uso")])
+        now = dt.datetime.now(dt.timezone.utc)
+        b = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(self.key.public_key())
+             .serial_number(3).not_valid_before(now - dt.timedelta(minutes=1)).not_valid_after(now + dt.timedelta(days=1)))
+        if with_extensions:
+            b = b.add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True).add_extension(
+                x509.KeyUsage(digital_signature=digital_signature, key_cert_sign=key_cert_sign, crl_sign=False,
+                              content_commitment=False, key_encipherment=False, data_encipherment=False,
+                              key_agreement=False, encipher_only=False, decipher_only=False), critical=True)
+        return certs.to_pem(b.sign(self.key, hashes.SHA256()))
+
+    def test_certificate_usage_is_checked(self):
+        certs.load_trusted(self._cert())  # válido: CA con firma de datos y de certificados
+        for bad in (self._cert(with_extensions=False), self._cert(ca=False),
+                    self._cert(key_cert_sign=False), self._cert(digital_signature=False)):
+            with self.assertRaises(IntegrityError):
+                certs.load_trusted(bad)
+
 
 class EncodingTests(unittest.TestCase):
     def test_strict_base64(self):

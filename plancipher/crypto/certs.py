@@ -42,8 +42,21 @@ def fingerprint(cert: x509.Certificate) -> str:
     return cert.fingerprint(hashes.SHA256()).hex()
 
 
+def _check_usage(cert: x509.Certificate) -> None:
+    """El ancla debe ser una CA (basicConstraints) y poder firmar datos y certificados (keyUsage)."""
+    try:
+        bc = cert.extensions.get_extension_for_class(x509.BasicConstraints).value
+        ku = cert.extensions.get_extension_for_class(x509.KeyUsage).value
+    except x509.ExtensionNotFound as exc:
+        raise IntegrityError("Al certificado le faltan basicConstraints o keyUsage") from exc
+    if not bc.ca:
+        raise IntegrityError("El certificado no es de una autoridad (basicConstraints: CA=false)")
+    if not (ku.digital_signature and ku.key_cert_sign):
+        raise IntegrityError("keyUsage no permite firmar datos y certificados")
+
+
 def load_trusted(pem: bytes, expected_fingerprint: str | None = None) -> x509.Certificate:
-    """Carga el ancla de confianza validando fechas, autofirma, tipo de clave y huella."""
+    """Carga el ancla de confianza validando fechas, autofirma, usos (CA y keyUsage), tipo de clave y huella."""
     try:
         cert = x509.load_pem_x509_certificate(pem)
         now = dt.datetime.now(dt.timezone.utc)
@@ -52,6 +65,7 @@ def load_trusted(pem: bytes, expected_fingerprint: str | None = None) -> x509.Ce
         cert.verify_directly_issued_by(cert)
     except (ValueError, InvalidSignature, TypeError) as exc:
         raise IntegrityError("Certificado de la secretaría inválido") from exc
+    _check_usage(cert)
     pub = cert.public_key()
     if not (isinstance(pub, ec.EllipticCurvePublicKey) and isinstance(pub.curve, ec.SECP256R1)):
         raise IntegrityError("El certificado no contiene una clave ECDSA P-256")

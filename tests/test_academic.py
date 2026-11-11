@@ -160,6 +160,8 @@ class SecretariaTests(TmpDirCase):
     def test_double_init_and_weak_passphrase(self):
         with self.assertRaises(ValidationError):
             Secretaria.init(self.dir, "corta", FAST)
+        with self.assertRaises(ValidationError):  # larga pero de diccionario
+            Secretaria.init(self.dir, "Contraseña-123456", FAST)
         Secretaria.init(self.dir, SEC_PASS, FAST)
         with self.assertRaises(ValidationError):
             Secretaria.init(self.dir, SEC_PASS, FAST)
