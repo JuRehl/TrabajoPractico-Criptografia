@@ -8,7 +8,7 @@ Aplicación de línea de comandos para que los estudiantes consulten su **planni
 ```bash
 python3 -m venv .venv && source .venv/bin/activate   # Python >= 3.10
 pip install -r requirements.txt                       # cryptography==50.0.2
-python -m unittest discover -s tests -t .             # 71 pruebas, positivas y negativas
+python -m unittest discover -s tests -t .             # 75 pruebas, positivas y negativas
 bash scripts/demo.sh                                  # demo completa con manipulaciones
 ```
 

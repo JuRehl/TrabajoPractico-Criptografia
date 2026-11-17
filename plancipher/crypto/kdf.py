@@ -14,9 +14,19 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 
+from ..errors import IntegrityError
+
 log = logging.getLogger("plancipher.crypto.kdf")
 
 SALT_LEN = 16  # 128 bits aleatorios por usuario
+
+# Límites para parámetros LEÍDOS DE DISCO. Un fichero manipulado podría pedir valores
+# inválidos (error no controlado) o enormes (memoria/CPU sin límite: DoS).
+MIN_N = 2**10              # suelo usado en los tests; el valor real por defecto es 2^17
+MAX_N = 2**20
+MAX_R = 16
+MAX_P = 4
+MAX_MEMORY = 256 * 2**20   # scrypt usa ~128·r·n bytes; el valor por defecto usa 128 MiB
 
 
 @dataclass(frozen=True)
@@ -32,7 +42,19 @@ class KdfParams:
 
     @classmethod
     def from_dict(cls, d: dict) -> "KdfParams":
-        return cls(n=int(d["n"]), r=int(d["r"]), p=int(d["p"]))
+        """Lee parámetros guardados y los RECHAZA (IntegrityError) si están fuera de rango."""
+        try:
+            n, r, p = d["n"], d["r"], d["p"]
+        except (KeyError, TypeError) as exc:
+            raise IntegrityError("Parámetros de scrypt ausentes o malformados") from exc
+        # Enteros estrictos: ni bool, ni float, ni texto ("131072" o 131072.5 no se aceptan).
+        if not all(isinstance(v, int) and not isinstance(v, bool) for v in (n, r, p)):
+            raise IntegrityError("Parámetros de scrypt con tipo inválido")
+        if not (MIN_N <= n <= MAX_N and n & (n - 1) == 0):
+            raise IntegrityError("Parámetro n de scrypt fuera de rango o no potencia de 2")
+        if not (1 <= r <= MAX_R and 1 <= p <= MAX_P and 128 * r * n <= MAX_MEMORY):
+            raise IntegrityError("Parámetros r/p de scrypt fuera de rango")
+        return cls(n=n, r=r, p=p)
 
 
 def new_salt() -> bytes:

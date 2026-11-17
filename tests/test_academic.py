@@ -177,6 +177,12 @@ class SecretariaTests(TmpDirCase):
         with self.assertRaises(AuthenticationError):
             Secretaria.unlock(self.dir, SEC_PASS)
 
+    def test_tampered_scrypt_params_in_key_file(self):
+        Secretaria.init(self.dir, SEC_PASS, FAST)
+        self.rewrite_json("secretaria/signing_key.json", lambda d: d.update(n=2**30))
+        with self.assertRaises(IntegrityError):
+            Secretaria.unlock(self.dir, SEC_PASS)
+
     def test_certificate_swapped_for_another_one(self):
         Secretaria.init(self.dir, SEC_PASS, FAST)
         with tempfile.TemporaryDirectory() as other:

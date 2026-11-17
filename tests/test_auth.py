@@ -88,6 +88,13 @@ class AuthTests(TmpDirCase):
         with self.assertRaises((AuthenticationError, IntegrityError)):
             self.users.login("carol", "clave-valida-de-prueba-3")
 
+    def test_tampered_scrypt_params_rejected(self):
+        """n no potencia de 2 (antes: ValueError sin capturar) y n enorme (antes: proceso colgado)."""
+        for n in (3, 2**30):
+            self.rewrite_json("users.json", lambda d, n=n: d["alice"]["kdf"].update(n=n))
+            with self.assertRaises(IntegrityError, msg=n):
+                self.users.login("alice", PASS_A)
+
     def test_corrupted_users_file_fails_safely(self):
         (self.dir / "users.json").write_text("{no es json")
         with self.assertRaises(ValidationError):

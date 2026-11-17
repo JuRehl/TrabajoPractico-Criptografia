@@ -118,6 +118,21 @@ class KdfTests(unittest.TestCase):
     def test_salts_are_random(self):
         self.assertEqual(len({kdf.new_salt() for _ in range(500)}), 500)
 
+    def test_params_roundtrip_through_dict(self):
+        for params in (kdf.KdfParams(), FAST):
+            self.assertEqual(kdf.KdfParams.from_dict(params.to_dict()), params)
+
+    def test_tampered_params_rejected_cleanly(self):
+        """Parámetros leídos de disco: inválidos o desorbitados -> IntegrityError, sin ejecutar scrypt."""
+        good = kdf.KdfParams().to_dict()
+        for bad in (dict(good, n=3), dict(good, n=0), dict(good, n=-2**17), dict(good, n=2**30),
+                    dict(good, n=2**8), dict(good, r=0), dict(good, r=10**6), dict(good, p=0),
+                    dict(good, p=100), dict(good, n=2**20, r=16),  # 2 GiB de memoria
+                    dict(good, n="131072"), dict(good, n=131072.0), dict(good, n=True),
+                    {"r": 8, "p": 1}, None, "texto"):
+            with self.assertRaises(IntegrityError, msg=bad):
+                kdf.KdfParams.from_dict(bad)
+
 
 class KeystoreTests(unittest.TestCase):
     def test_roundtrip_wrong_passphrase_and_tamper(self):
