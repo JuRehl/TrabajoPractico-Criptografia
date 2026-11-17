@@ -1,4 +1,4 @@
-"""Certificado X.509 autofirmado de la secretaría (ancla de confianza)."""
+"""Certificado X.509 autofirmado de la secretaría"""
 import datetime as dt
 
 from cryptography import x509
@@ -11,6 +11,7 @@ from ..errors import IntegrityError
 
 
 def create_self_signed(priv: ec.EllipticCurvePrivateKey, common_name: str, days: int = 730) -> x509.Certificate:
+    """Certificado autofirmado válido por dos años"""
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
     now = dt.datetime.now(dt.timezone.utc)
     return (
@@ -43,7 +44,6 @@ def fingerprint(cert: x509.Certificate) -> str:
 
 
 def _check_usage(cert: x509.Certificate) -> None:
-    """El ancla debe ser una CA (basicConstraints) y poder firmar datos y certificados (keyUsage)."""
     try:
         bc = cert.extensions.get_extension_for_class(x509.BasicConstraints).value
         ku = cert.extensions.get_extension_for_class(x509.KeyUsage).value
@@ -56,7 +56,6 @@ def _check_usage(cert: x509.Certificate) -> None:
 
 
 def load_trusted(pem: bytes, expected_fingerprint: str | None = None) -> x509.Certificate:
-    """Carga el ancla de confianza validando fechas, autofirma, usos (CA y keyUsage), tipo de clave y huella."""
     try:
         cert = x509.load_pem_x509_certificate(pem)
         now = dt.datetime.now(dt.timezone.utc)

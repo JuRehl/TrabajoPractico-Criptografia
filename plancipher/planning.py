@@ -60,7 +60,6 @@ class PlanningService:
         return entry_id
 
     def list(self, session: Session) -> tuple[list[dict], list[str]]:
-        """Devuelve (entradas válidas ordenadas, ids rechazados por fallo de integridad)."""
         entries, rejected = [], []
         for rec in self.store.load([]):
             if not isinstance(rec, dict) or rec.get("owner") != session.username:

@@ -1,8 +1,6 @@
-"""Interfaz de línea de comandos. Solo entrada/salida: la lógica vive en los servicios.
-
-Secretos: se piden con getpass (sin eco) o, para scripts/demos, se leen de las
-variables PLANCIPHER_PASSWORD y PLANCIPHER_SECRETARIA_PASS. Nunca se imprimen.
-Códigos de salida: 0 OK, 1 error controlado, 3 datos rechazados por integridad.
+"""Interfaz de línea de comandos. Lee parámetros de entrada y muestra los
+resultados. Códigos de salida: 0 OK, 1 error controlado, 3 datos rechazados 
+por integridad.
 """
 import argparse
 import getpass
@@ -101,7 +99,7 @@ def run(args) -> int:
         _users(data).register(args.user, _secret("Contraseña: ", "PLANCIPHER_PASSWORD", confirm=True))
         print(f"Usuario '{args.user}' registrado. Pide a la secretaría que firme tu matrícula.")
 
-    else:  # comandos del estudiante: requieren login
+    else:  
         users = _users(data)
         session = users.login(args.user, _secret("Contraseña: ", "PLANCIPHER_PASSWORD"))
         if args.cmd == "add-planning":

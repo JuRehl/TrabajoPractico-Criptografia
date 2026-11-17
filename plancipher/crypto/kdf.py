@@ -18,15 +18,13 @@ from ..errors import IntegrityError
 
 log = logging.getLogger("plancipher.crypto.kdf")
 
-SALT_LEN = 16  # 128 bits aleatorios por usuario
+SALT_LEN = 16  
 
-# Límites para parámetros LEÍDOS DE DISCO. Un fichero manipulado podría pedir valores
-# inválidos (error no controlado) o enormes (memoria/CPU sin límite: DoS).
-MIN_N = 2**10              # suelo usado en los tests; el valor real por defecto es 2^17
+MIN_N = 2**10              
 MAX_N = 2**20
 MAX_R = 16
 MAX_P = 4
-MAX_MEMORY = 256 * 2**20   # scrypt usa ~128·r·n bytes; el valor por defecto usa 128 MiB
+MAX_MEMORY = 256 * 2**20  
 
 
 @dataclass(frozen=True)
@@ -42,12 +40,11 @@ class KdfParams:
 
     @classmethod
     def from_dict(cls, d: dict) -> "KdfParams":
-        """Lee parámetros guardados y los RECHAZA (IntegrityError) si están fuera de rango."""
+        """Lee parámetros guardados y los rechaza"""
         try:
             n, r, p = d["n"], d["r"], d["p"]
         except (KeyError, TypeError) as exc:
             raise IntegrityError("Parámetros de scrypt ausentes o malformados") from exc
-        # Enteros estrictos: ni bool, ni float, ni texto ("131072" o 131072.5 no se aceptan).
         if not all(isinstance(v, int) and not isinstance(v, bool) for v in (n, r, p)):
             raise IntegrityError("Parámetros de scrypt con tipo inválido")
         if not (MIN_N <= n <= MAX_N and n & (n - 1) == 0):
@@ -75,7 +72,6 @@ def _hkdf(master: bytes, info: bytes) -> bytes:
 
 
 def derive_subkeys(password: str, salt: bytes, params: KdfParams) -> tuple[bytes, bytes]:
-    """Devuelve (verificador_de_login, KEK)."""
     master = derive_master(password, salt, params)
     return _hkdf(master, b"plancipher/v1/auth"), _hkdf(master, b"plancipher/v1/kek")
 

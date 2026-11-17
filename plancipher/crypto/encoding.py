@@ -11,7 +11,7 @@ def b64e(data: bytes) -> str:
 
 
 def b64d(text: str) -> bytes:
-    """Decodifica base64 de forma estricta; cualquier anomalía es ValidationError."""
+    """Decodifica base64 de forma estricta"""
     if not isinstance(text, str):
         raise ValidationError("Campo base64 con tipo inválido")
     try:
@@ -21,10 +21,6 @@ def b64d(text: str) -> bytes:
 
 
 def canonical(domain: str, obj) -> bytes:
-    """Bytes deterministas de `obj` con prefijo de dominio.
-
-    El prefijo (separación de dominios) impide reutilizar una firma emitida para
-    un propósito (p. ej. matrícula) como si fuera de otro (p. ej. nota).
-    """
+    """Impedimiento para reutilizar firma"""
     body = json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return f"plancipher/v1/{domain}\x00".encode("ascii") + body.encode("ascii")

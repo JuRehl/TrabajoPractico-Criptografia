@@ -1,7 +1,7 @@
 """Protección de secretos con passphrase: scrypt -> AES-256-GCM.
 
-Se usa para la clave privada de firma de la secretaría. El fichero guardado
-contiene solo sal, parámetros y el cifrado autenticado; nunca la clave en claro.
+Se usa para la clave privada de firma de la secretaría. Nunca se 
+guarda la clave en claro.
 """
 import logging
 

@@ -22,7 +22,6 @@ def sign(priv: ec.EllipticCurvePrivateKey, data: bytes) -> bytes:
 
 
 def verify(pub: ec.EllipticCurvePublicKey, signature: bytes, data: bytes) -> None:
-    """Lanza IntegrityError si la firma no es válida; no devuelve nada si es válida."""
     try:
         pub.verify(signature, data, ec.ECDSA(hashes.SHA256()))
     except (InvalidSignature, ValueError) as exc:

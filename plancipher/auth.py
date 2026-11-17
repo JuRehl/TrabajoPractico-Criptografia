@@ -2,8 +2,7 @@
 
 Almacenamiento: scrypt(contraseña, sal) -> HKDF -> {verificador, KEK}. Solo se
 guarda el verificador; la KEK se recalcula en cada login y protege la clave
-privada X25519 del usuario. Un atacante con el fichero de usuarios debe pagar
-el coste de scrypt por cada intento y no obtiene la KEK.
+privada X25519 del usuario.
 """
 import logging
 import re
@@ -21,7 +20,7 @@ from .storage import JsonStore
 log = logging.getLogger("plancipher.auth")
 
 USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{2,31}$")
-RESERVED = {"secretaria", "admin", "root", "system"}  # el rol de secretaría no se obtiene por nombre
+RESERVED = {"secretaria", "admin", "root", "system"}  
 MIN_PASSWORD = 12
 MAX_FAILED = 5
 LOCK_BASE_SECONDS = 30
@@ -35,7 +34,6 @@ def _key_aad(username: str) -> bytes:
 
 @dataclass
 class Session:
-    """Material desbloqueado durante UN comando. No se persiste."""
 
     username: str
     kek: bytes
@@ -66,7 +64,7 @@ class UserService:
         self.params = params
         self.clock = clock
 
-    # --- acceso a datos -------------------------------------------------
+    # Acceso a datos 
     def _all(self) -> dict:
         data = self.store.load({})
         if not isinstance(data, dict):
@@ -79,7 +77,7 @@ class UserService:
     def usernames(self) -> list[str]:
         return sorted(self._all())
 
-    # --- registro -------------------------------------------------------
+    # Registro
     def register(self, username: str, password: str) -> None:
         validate_username(username)
         if username in RESERVED:
@@ -104,12 +102,11 @@ class UserService:
         self.store.save(users)
         log.info("Usuario '%s' registrado (scrypt n=%d, X25519)", username, self.params.n)
 
-    # --- login ----------------------------------------------------------
+    # Login
     def login(self, username: str, password: str) -> Session:
         users = self._all()
         rec = users.get(username) if isinstance(username, str) else None
         if rec is None:
-            # Coste equivalente al de un usuario real: no revela si el usuario existe por tiempo.
             kdf.derive_subkeys(password, b"\x00" * kdf.SALT_LEN, self.params)
             raise AuthenticationError(GENERIC_LOGIN_ERROR)
 
@@ -138,7 +135,7 @@ class UserService:
         log.info("Login correcto de '%s'", username)
         return Session(username, kek, priv, priv.public_key())
 
-    # --- matrícula firmada ---------------------------------------------
+    # Matrícula firmada
     def set_enrollment(self, username: str, signature_b64: str) -> None:
         users = self._all()
         if username not in users:

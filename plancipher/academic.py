@@ -50,8 +50,8 @@ def validate_plan(plan) -> dict:
 
 @dataclass
 class GradesView:
-    grades: list = field(default_factory=list)    # nota vigente por asignatura
-    rejected: list = field(default_factory=list)  # (id, motivo) de registros rechazados
+    grades: list = field(default_factory=list)   
+    rejected: list = field(default_factory=list)  
 
 
 class AcademicService:
@@ -60,7 +60,7 @@ class AcademicService:
         self.records = JsonStore(Path(data_dir) / "records.json")
         self.plan_store = JsonStore(Path(data_dir) / "plan.json")
 
-    # --- matrícula ------------------------------------------------------
+    # Matrícula 
     def enroll(self, sec: Secretaria, username: str) -> None:
         rec = self.users.get(username)
         if rec is None:
@@ -76,7 +76,7 @@ class AcademicService:
         anchor.verify("enroll", {"username": username, "pub": rec["pub"]}, rec["enrollment"])
         return hybrid.public_from_bytes(b64d(rec["pub"]))
 
-    # --- plan de estudios ----------------------------------------------
+    # Plan de estudios 
     def publish_plan(self, sec: Secretaria, plan: dict) -> None:
         plan = validate_plan(plan)
         plan.update({"v": 1, "issued_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")})
@@ -92,7 +92,7 @@ class AcademicService:
             raise ValidationError("Plan de estudios malformado") from exc
         return doc["plan"]
 
-    # --- notas: emisión (secretaría) -----------------------------------
+    # Notas: emisión (secretaría) 
     def issue_grade(self, sec: Secretaria, student: str, subject: str, grade: float, term: str) -> str:
         plan = self.load_plan(sec.anchor)
         if subject not in {s["code"] for s in plan["subjects"]}:
@@ -140,7 +140,7 @@ class AcademicService:
         existing.append(record)
         self.records.save(existing)
 
-    # --- notas: lectura (estudiante) -----------------------------------
+    # Notas: lectura (estudiante) 
     def read_grades(self, session: Session, anchor: TrustAnchor) -> GradesView:
         view, latest, seen_ids = GradesView(), {}, set()
         for rec in self._load_records():

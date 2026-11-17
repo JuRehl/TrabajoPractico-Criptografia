@@ -3,8 +3,8 @@
 No se compara solo la contraseña literal: se reduce a sus letras (sin tildes,
 dígitos ni símbolos) y se busca en una lista de palabras habituales. Así se
 rechazan variantes triviales como "Password12345678" o "Contraseña-2026!".
-Tolera hasta tres letras añadidas ("bienvenidox"). Es un filtro corto y deliberadamente simple; no sustituye a una lista grande
-(p. ej. las de HIBP) en un sistema real.
+Tolera hasta tres letras añadidas ("bienvenidox"). Es un filtro corto y
+deliberadamente simple; no sustituye a una lista grande en un sistema real.
 """
 import re
 import unicodedata
@@ -25,11 +25,10 @@ def _letters_only(text: str) -> str:
     return re.sub(r"[^a-z]", "", folded)
 
 
-MAX_EXTRA_LETTERS = 3  # "bienvenidox" sigue siendo "bienvenido"; "caballograpaverde" no es "clave"
+MAX_EXTRA_LETTERS = 3  
 
 
 def is_common_password(password: str) -> bool:
-    """True si es solo dígitos o sus letras son una palabra habitual (con hasta 3 letras de más)."""
     if re.fullmatch(r"\d+", password):
         return True
     core = _letters_only(password)

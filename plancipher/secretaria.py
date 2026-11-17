@@ -1,7 +1,7 @@
 """Secretaría: emisora de firmas (matrículas, plan de estudios, notas).
 
 La clave privada de firma ECDSA P-256 se guarda cifrada con una passphrase
-(scrypt + AES-256-GCM). El certificado autofirmado es el ancla de confianza que
+(scrypt + AES-256-GCM). El certificado autofirmado es el certificado de confianza que
 usan los estudiantes para verificar todo lo que la secretaría firma.
 """
 import logging
@@ -37,7 +37,7 @@ class TrustAnchor:
         except FileNotFoundError as exc:
             raise ValidationError("No existe la secretaría: ejecuta 'init-secretaria' primero") from exc
         cert = certs.load_trusted(pem, expected_fingerprint)
-        log.debug("Ancla de confianza cargada, huella SHA-256 %s", certs.fingerprint(cert))
+        log.debug("Certificado de confianza cargado, huella SHA-256 %s", certs.fingerprint(cert))
         return cls(cert)
 
     @property
@@ -45,7 +45,7 @@ class TrustAnchor:
         return certs.fingerprint(self.cert)
 
     def verify(self, domain: str, obj, signature_b64: str) -> None:
-        """Verifica la firma sobre la serialización canónica de `obj` (IntegrityError si falla)."""
+        """Verifica la firma sobre la serialización canónica de `obj`"""
         signing.verify(self.public_key, b64d(signature_b64), canonical(domain, obj))
 
 
@@ -83,7 +83,7 @@ class Secretaria:
         except (KeyError, ValueError, TypeError) as exc:
             raise ValidationError("Fichero de clave de la secretaría malformado") from exc
         key = signing.private_from_der(der)
-        # La clave descifrada debe corresponder al certificado de confianza.
+        # Confirmación de que la clave de descifrado corresponde a la de confianza
         if key.public_key().public_numbers() != anchor.public_key.public_numbers():
             raise IntegrityError("La clave de firma no corresponde al certificado")
         return cls(key, anchor)

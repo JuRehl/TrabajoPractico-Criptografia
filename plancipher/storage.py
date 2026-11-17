@@ -29,7 +29,7 @@ class JsonStore:
 
     def save(self, obj) -> None:
         ensure_dir(self.path.parent)
-        fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".tmp-")  # mkstemp crea con 0600
+        fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".tmp-") 
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 json.dump(obj, fh, indent=2, sort_keys=True)

@@ -2,7 +2,7 @@
 
 Permite a la secretaría entregar una clave de contenido a un estudiante usando
 solo su clave pública. El remitente genera un par X25519 efímero por mensaje,
-por lo que la clave simétrica derivada es siempre distinta.
+haciendo que la clave simétrica derive siempre de manera distinta 
 """
 import logging
 
@@ -62,7 +62,7 @@ def open_sealed(priv: X25519PrivateKey, blob: bytes, aad: bytes) -> bytes:
     eph_pub, body = blob[:PUB_LEN], blob[PUB_LEN:]
     try:
         shared = priv.exchange(X25519PublicKey.from_public_bytes(eph_pub))
-    except ValueError as exc:  # punto de orden bajo -> secreto compartido nulo
+    except ValueError as exc:  
         raise IntegrityError("Clave efímera inválida") from exc
     key = _derive(shared, eph_pub, public_to_bytes(priv.public_key()))
     return aead.decrypt(key, body, aad)
