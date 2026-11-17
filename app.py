@@ -36,6 +36,14 @@ def show_error(exc: Exception) -> None:
         st.error(str(exc))
 
 
+def done(message: str) -> None:
+    """Tras un cambio, vuelve a ejecutar el script entero para que TODAS las pestañas
+    se dibujen con los datos nuevos (Streamlit pinta en orden: la pestaña Estudiante
+    se dibuja antes que la de Secretaría). El mensaje se muestra en la siguiente ejecución."""
+    st.session_state["flash"] = message
+    st.rerun()
+
+
 def student_view(session) -> None:
     head, out = st.columns([4, 1])
     head.caption(f"Sesión de **{session.username}**")
@@ -43,7 +51,8 @@ def student_view(session) -> None:
         st.session_state.pop("student", None)
         st.rerun()
 
-    tab_plan, tab_notes, tab_pending = st.tabs(["Planning", "Notas", "Pendientes"])
+    tab_plan, tab_notes, tab_pending = st.tabs(["Planning", "Notas", "Pendientes"], key="student_tab",
+                                               on_change="rerun")
 
     with tab_plan:
         with st.form("add_planning", clear_on_submit=True):
@@ -53,9 +62,10 @@ def student_view(session) -> None:
             if st.form_submit_button("Añadir (se cifra con AES-256-GCM)"):
                 try:
                     planning.add(session, day.isoformat(), start.strftime("%H:%M"), text)
-                    st.success("Entrada añadida")
                 except PlanCipherError as exc:
                     show_error(exc)
+                else:
+                    done("Entrada añadida")
         entries, rejected = planning.list(session)
         if entries:
             st.table([{"Fecha": e["day"], "Hora": e["start"], "Actividad": e["text"]} for e in entries])
@@ -120,9 +130,10 @@ def student_tab() -> None:
             else:
                 try:
                     users.register(user.strip(), password)
-                    st.success("Registrado. Pide a la secretaría que firme tu matrícula.")
                 except PlanCipherError as exc:
                     show_error(exc)
+                else:
+                    done("Registrado. Pide a la secretaría que firme tu matrícula.")
 
 
 def secretaria_tab() -> None:
@@ -139,10 +150,11 @@ def secretaria_tab() -> None:
                         fingerprint = Secretaria.init(DATA, passphrase)
                         sec = Secretaria.unlock(DATA, passphrase)
                         acad.publish_plan(sec, json.loads(SAMPLE_PLAN.read_text(encoding="utf-8")))
-                        st.success("Secretaría creada y plan publicado y firmado.")
-                        st.code(fingerprint, language=None)
                     except PlanCipherError as exc:
                         show_error(exc)
+                    else:
+                        done("Secretaría creada y plan publicado y firmado. "
+                             f"Huella SHA-256 del certificado: `{fingerprint}`")
         return
 
     sec = st.session_state.get("sec")
@@ -175,9 +187,10 @@ def secretaria_tab() -> None:
         if st.form_submit_button("Firmar matrícula"):
             try:
                 acad.enroll(sec, student)
-                st.success(f"Matrícula de {student} firmada")
             except PlanCipherError as exc:
                 show_error(exc)
+            else:
+                done(f"Matrícula de {student} firmada")
 
     st.subheader("Emitir nota")
     try:
@@ -193,14 +206,18 @@ def secretaria_tab() -> None:
         if st.form_submit_button("Emitir (cifrada y firmada)"):
             try:
                 acad.issue_grade(sec, student, subject, float(grade), term.strip())
-                st.success("Nota emitida: cifrada para el estudiante y firmada")
             except PlanCipherError as exc:
                 show_error(exc)
+            else:
+                done(f"Nota de {subject} emitida para {student}: cifrada y firmada")
 
 
 st.title("🔐 PlanCipher")
 st.caption("Planning, notas y asignaturas pendientes, cifrados y firmados. Demo local.")
-tab_student, tab_secretaria = st.tabs(["Estudiante", "Secretaría"])
+if flash := st.session_state.pop("flash", None):
+    st.success(flash)
+# Con `key`, la pestaña activa se conserva tras st.rerun(); al cambiar de pestaña se vuelve a ejecutar.
+tab_student, tab_secretaria = st.tabs(["Estudiante", "Secretaría"], key="main_tab", on_change="rerun")
 with tab_student:
     student_tab()
 with tab_secretaria:
