@@ -23,6 +23,26 @@ DATA = ensure_dir(Path(os.environ.get("PLANCIPHER_DATA", "data")))
 FP = os.environ.get("PLANCIPHER_TRUST_FP") or None
 
 st.set_page_config(page_title="PlanCipher", page_icon="🔐")
+
+# Estética institucional (colores base en .streamlit/config.toml). Solo presentación.
+UC3M_BLUE = "#000E78"
+st.markdown(f"""
+<style>
+  .block-container {{ padding-top: 2.2rem; }}
+  .pc-header {{
+    background: {UC3M_BLUE}; color: #fff; padding: 1.6rem 1.8rem 1.4rem;
+    border-bottom: 5px solid #5B7BD5; margin-bottom: 1.4rem;
+  }}
+  .pc-header .pc-kicker {{ font-size: .78rem; letter-spacing: .14em; text-transform: uppercase; opacity: .8; }}
+  .pc-header h1 {{ color: #fff; margin: .2rem 0 .3rem; padding: 0; font-size: 2.1rem; }}
+  .pc-header p {{ margin: 0; opacity: .9; font-size: .95rem; }}
+  [data-testid="stTable"] th {{ background: {UC3M_BLUE}; color: #fff; font-weight: 600; }}
+  [data-testid="stForm"] {{ border-left: 4px solid {UC3M_BLUE}; }}
+  h2, h3 {{ color: {UC3M_BLUE}; }}
+  .pc-footer {{ margin-top: 2.5rem; padding-top: .8rem; border-top: 1px solid #D3D9E6;
+               font-size: .8rem; color: #5A6078; }}
+</style>
+""", unsafe_allow_html=True)
 users = UserService(JsonStore(DATA / "users.json"))
 planning = PlanningService(JsonStore(DATA / "planning.json"))
 acad = AcademicService(DATA, users)
@@ -59,7 +79,7 @@ def student_view(session) -> None:
             day = st.date_input("Fecha", value=dt.date.today())
             start = st.time_input("Hora", value=dt.time(9, 0))
             text = st.text_input("Actividad", max_chars=200)
-            if st.form_submit_button("Añadir (se cifra con AES-256-GCM)"):
+            if st.form_submit_button("Añadir (se cifra con AES-256-GCM)", type="primary"):
                 try:
                     planning.add(session, day.isoformat(), start.strftime("%H:%M"), text)
                 except PlanCipherError as exc:
@@ -113,7 +133,7 @@ def student_tab() -> None:
     with tab_login, st.form("login"):
         user = st.text_input("Usuario")
         password = st.text_input("Contraseña", type="password")
-        if st.form_submit_button("Entrar"):
+        if st.form_submit_button("Entrar", type="primary"):
             try:
                 st.session_state["student"] = users.login(user.strip(), password)
             except PlanCipherError as exc:
@@ -124,7 +144,7 @@ def student_tab() -> None:
         user = st.text_input("Usuario nuevo")
         password = st.text_input("Contraseña (mín. 12 caracteres)", type="password")
         again = st.text_input("Repite la contraseña", type="password")
-        if st.form_submit_button("Registrarse"):
+        if st.form_submit_button("Registrarse", type="primary"):
             if password != again:
                 st.error("Las contraseñas no coinciden")
             else:
@@ -142,7 +162,7 @@ def secretaria_tab() -> None:
         with st.form("init_sec"):
             passphrase = st.text_input("Passphrase (mín. 12 caracteres)", type="password")
             again = st.text_input("Repite la passphrase", type="password")
-            if st.form_submit_button("Inicializar secretaría"):
+            if st.form_submit_button("Inicializar secretaría", type="primary"):
                 if passphrase != again:
                     st.error("Las passphrases no coinciden")
                 else:
@@ -161,7 +181,7 @@ def secretaria_tab() -> None:
     if sec is None:
         with st.form("unlock_sec"):
             passphrase = st.text_input("Passphrase de la secretaría", type="password")
-            if st.form_submit_button("Desbloquear"):
+            if st.form_submit_button("Desbloquear", type="primary"):
                 try:
                     st.session_state["sec"] = Secretaria.unlock(DATA, passphrase, FP)
                 except PlanCipherError as exc:
@@ -184,7 +204,7 @@ def secretaria_tab() -> None:
     st.subheader("Firmar matrícula")
     with st.form("enroll"):
         student = st.selectbox("Estudiante", names, key="enroll_student")
-        if st.form_submit_button("Firmar matrícula"):
+        if st.form_submit_button("Firmar matrícula", type="primary"):
             try:
                 acad.enroll(sec, student)
             except PlanCipherError as exc:
@@ -203,7 +223,7 @@ def secretaria_tab() -> None:
         subject = st.selectbox("Asignatura", codes)
         grade = st.number_input("Nota", min_value=0.0, max_value=10.0, value=5.0, step=0.1)
         term = st.text_input("Convocatoria", value=f"{dt.date.today().year}-1C")
-        if st.form_submit_button("Emitir (cifrada y firmada)"):
+        if st.form_submit_button("Emitir (cifrada y firmada)", type="primary"):
             try:
                 acad.issue_grade(sec, student, subject, float(grade), term.strip())
             except PlanCipherError as exc:
@@ -212,8 +232,13 @@ def secretaria_tab() -> None:
                 done(f"Nota de {subject} emitida para {student}: cifrada y firmada")
 
 
-st.title("🔐 PlanCipher")
-st.caption("Planning, notas y asignaturas pendientes, cifrados y firmados. Demo local.")
+st.markdown("""
+<div class="pc-header">
+  <div class="pc-kicker">Criptografía y Seguridad Informática · Práctica final</div>
+  <h1>PlanCipher</h1>
+  <p>Planning, notas y asignaturas pendientes, cifrados y firmados. Demo local.</p>
+</div>
+""", unsafe_allow_html=True)
 if flash := st.session_state.pop("flash", None):
     st.success(flash)
 # Con `key`, la pestaña activa se conserva tras st.rerun(); al cambiar de pestaña se vuelve a ejecutar.
@@ -222,3 +247,5 @@ with tab_student:
     student_tab()
 with tab_secretaria:
     secretaria_tab()
+st.markdown('<div class="pc-footer">PlanCipher · AES-256-GCM · X25519 · ECDSA P-256 · scrypt</div>',
+            unsafe_allow_html=True)

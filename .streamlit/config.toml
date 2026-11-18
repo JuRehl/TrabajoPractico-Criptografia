@@ -1,0 +1,22 @@
+# Tema inspirado en la imagen institucional de la UC3M: azul corporativo oscuro,
+# fondo blanco, grises azulados suaves y esquinas poco redondeadas.
+[theme]
+base = "light"
+primaryColor = "#000E78"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#EEF1F7"
+textColor = "#1B1F3B"
+linkColor = "#000E78"
+borderColor = "#D3D9E6"
+baseRadius = "small"
+buttonRadius = "small"
+font = "Open Sans:https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap, sans-serif"
+headingFont = "Open Sans:https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap, sans-serif"
+headingFontWeights = [700, 700, 600]
+blueColor = "#000E78"
+
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false
