@@ -17,7 +17,7 @@ def generate_signing_key() -> ec.EllipticCurvePrivateKey:
 
 def sign(priv: ec.EllipticCurvePrivateKey, data: bytes) -> bytes:
     sig = priv.sign(data, ec.ECDSA(hashes.SHA256()))
-    log.debug("ECDSA-P256-SHA256: firma generada (%d bytes DER)", len(sig))
+    log.debug("ECDSA-P256-SHA256 (clave=%d bits): firma generada (%d bytes DER)", priv.curve.key_size, len(sig))
     return sig
 
 
@@ -25,9 +25,9 @@ def verify(pub: ec.EllipticCurvePublicKey, signature: bytes, data: bytes) -> Non
     try:
         pub.verify(signature, data, ec.ECDSA(hashes.SHA256()))
     except (InvalidSignature, ValueError) as exc:
-        log.warning("ECDSA-P256-SHA256: firma INVÁLIDA -> datos rechazados")
+        log.warning("ECDSA-P256-SHA256 (clave=%d bits): firma INVÁLIDA -> datos rechazados", pub.curve.key_size)
         raise IntegrityError("Firma digital inválida") from exc
-    log.debug("ECDSA-P256-SHA256: firma verificada OK")
+    log.debug("ECDSA-P256-SHA256 (clave=%d bits): firma verificada OK", pub.curve.key_size)
 
 
 def private_to_der(priv: ec.EllipticCurvePrivateKey) -> bytes:

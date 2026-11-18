@@ -52,7 +52,7 @@ def seal(recipient: X25519PublicKey, plaintext: bytes, aad: bytes) -> bytes:
     eph = X25519PrivateKey.generate()
     eph_pub = public_to_bytes(eph.public_key())
     key = _derive(eph.exchange(recipient), eph_pub, public_to_bytes(recipient))
-    log.debug("ECIES(X25519+HKDF-SHA256+AES-256-GCM): sellado para destinatario")
+    log.debug("ECIES sellar: X25519 efímero (255 bits) + HKDF-SHA256 -> clave AES-256-GCM de 256 bits")
     return eph_pub + aead.encrypt(key, plaintext, aad)
 
 
@@ -65,4 +65,5 @@ def open_sealed(priv: X25519PrivateKey, blob: bytes, aad: bytes) -> bytes:
     except ValueError as exc:  
         raise IntegrityError("Clave efímera inválida") from exc
     key = _derive(shared, eph_pub, public_to_bytes(priv.public_key()))
+    log.debug("ECIES abrir: X25519 (255 bits) + HKDF-SHA256 -> clave AES-256-GCM de 256 bits")
     return aead.decrypt(key, body, aad)

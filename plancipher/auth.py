@@ -97,7 +97,7 @@ class UserService:
             "enc_priv": b64e(aead.encrypt(kek, hybrid.private_to_bytes(priv), _key_aad(username))),
             "failed": 0,
             "locked_until": 0,
-            "enrollment": None,
+            "cert": None,  # certificado X.509 emitido por la secretaría al matricular
         }
         self.store.save(users)
         log.info("Usuario '%s' registrado (scrypt n=%d, X25519)", username, self.params.n)
@@ -135,10 +135,10 @@ class UserService:
         log.info("Login correcto de '%s'", username)
         return Session(username, kek, priv, priv.public_key())
 
-    # Matrícula firmada
-    def set_enrollment(self, username: str, signature_b64: str) -> None:
+    # Matrícula: certificado X.509 de la clave pública
+    def set_certificate(self, username: str, cert_pem: str) -> None:
         users = self._all()
         if username not in users:
             raise ValidationError("Usuario inexistente")
-        users[username]["enrollment"] = signature_b64
+        users[username]["cert"] = cert_pem
         self.store.save(users)

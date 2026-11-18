@@ -34,14 +34,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="plancipher", description="PlanCipher: planning y notas cifrados")
     p.add_argument("--data-dir", default=os.environ.get("PLANCIPHER_DATA", "data"), help="directorio de datos")
     p.add_argument("--trust-fingerprint", default=os.environ.get("PLANCIPHER_TRUST_FP"),
-                   help="huella SHA-256 esperada del certificado de la secretaría")
+                   help="huella SHA-256 esperada del certificado de la AC raíz (ancla de confianza)")
     p.add_argument("--debug", action="store_true", help="log de depuración (algoritmos, longitudes; nunca secretos)")
     p.add_argument("--version", action="version", version=__version__)
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("init-secretaria", help="crea la clave de firma y el certificado de la secretaría")
+    s = sub.add_parser("init-secretaria", help="crea la PKI: AC raíz, AC subordinada (secretaría) y CRL")
     s.add_argument("--plan", type=Path, default=SAMPLE_PLAN, help="JSON del plan de estudios a publicar")
-    s = sub.add_parser("enroll", help="[secretaría] firma la matrícula de un estudiante")
+    sub.add_parser("revoke-secretaria", help="[AC raíz] revoca el certificado de la secretaría (CRL)")
+    s = sub.add_parser("enroll", help="[secretaría] matricula a un estudiante: emite su certificado X.509")
     s.add_argument("user")
     s = sub.add_parser("issue-grade", help="[secretaría] emite una nota cifrada y firmada")
     s.add_argument("student")
@@ -78,26 +79,32 @@ def run(args) -> int:
 
     if args.cmd == "init-secretaria":
         plan = json.loads(args.plan.read_text(encoding="utf-8"))
+        root_pass = _secret("Passphrase de la AC raíz: ", "PLANCIPHER_ROOT_PASS", confirm=True)
         passphrase = _secret("Passphrase de la secretaría: ", "PLANCIPHER_SECRETARIA_PASS", confirm=True)
-        fingerprint = Secretaria.init(data, passphrase)
+        fingerprint = Secretaria.init(data, passphrase, root_passphrase=root_pass)
         sec = Secretaria.unlock(data, passphrase)
         AcademicService(data, _users(data)).publish_plan(sec, plan)
-        print(f"Secretaría creada. Huella SHA-256 del certificado:\n  {fingerprint}")
+        print("PKI creada: AC raíz -> AC subordinada (secretaría) + CRL.")
+        print(f"Huella SHA-256 de la AC raíz (ancla de confianza):\n  {fingerprint}")
         print("Plan de estudios publicado y firmado.")
+
+    elif args.cmd == "revoke-secretaria":
+        serial = Secretaria.revoke(data, _secret("Passphrase de la AC raíz: ", "PLANCIPHER_ROOT_PASS"))
+        print(f"Certificado de la secretaría (serie {serial:x}) revocado. Sus firmas dejan de aceptarse.")
 
     elif args.cmd in ("enroll", "issue-grade"):
         sec = Secretaria.unlock(data, _secret("Passphrase de la secretaría: ", "PLANCIPHER_SECRETARIA_PASS"), fp)
         acad = AcademicService(data, _users(data))
         if args.cmd == "enroll":
             acad.enroll(sec, args.user)
-            print(f"Matrícula de '{args.user}' firmada.")
+            print(f"Matrícula de '{args.user}': certificado X.509 emitido por la secretaría.")
         else:
             rid = acad.issue_grade(sec, args.student, args.subject.upper(), args.grade, args.term)
             print(f"Nota emitida (id {rid[:8]}): cifrada para '{args.student}' y firmada.")
 
     elif args.cmd == "register":
         _users(data).register(args.user, _secret("Contraseña: ", "PLANCIPHER_PASSWORD", confirm=True))
-        print(f"Usuario '{args.user}' registrado. Pide a la secretaría que firme tu matrícula.")
+        print(f"Usuario '{args.user}' registrado. Pide a la secretaría que emita tu certificado de matrícula.")
 
     else:  
         users = _users(data)

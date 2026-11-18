@@ -15,6 +15,7 @@ FAST = KdfParams(n=2**10, r=8, p=1)  # los valores reales (2^17) están en KdfPa
 PASS_A = "contrasena-de-prueba-A1"
 PASS_B = "contrasena-de-prueba-B2"
 SEC_PASS = "passphrase-secretaria-123"
+ROOT_PASS = "passphrase-ac-raiz-456"
 PLAN = {"degree": "Test", "subjects": [
     {"code": "CRIPTO", "name": "Criptografia", "credits": 6},
     {"code": "REDES", "name": "Redes", "credits": 6},
@@ -50,7 +51,7 @@ class SystemCase(TmpDirCase):
         super().setUp()
         self.clock = FakeClock()
         self.users = UserService(JsonStore(self.dir / "users.json"), FAST, clock=self.clock)
-        Secretaria.init(self.dir, SEC_PASS, FAST)
+        Secretaria.init(self.dir, SEC_PASS, FAST, root_passphrase=ROOT_PASS)
         self.sec = Secretaria.unlock(self.dir, SEC_PASS)
         self.anchor = TrustAnchor.load(self.dir)
         self.acad = AcademicService(self.dir, self.users)

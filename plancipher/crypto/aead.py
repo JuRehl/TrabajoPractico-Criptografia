@@ -25,8 +25,8 @@ def new_key() -> bytes:
 
 
 def encrypt(key: bytes, plaintext: bytes, aad: bytes) -> bytes:
-    """Encargado de generar un nonce de 21 bytes distinto en cad cifrado 
-    (cifrado AES-GCM, tag de 16 bytes)"""
+    """Genera un nonce aleatorio de 12 bytes (96 bits) distinto en cada cifrado
+    (AES-256-GCM, tag de 16 bytes)."""
     if len(key) != KEY_LEN:
         raise ValueError("La clave AES-256 debe tener 32 bytes")
     nonce = os.urandom(NONCE_LEN)
@@ -36,14 +36,16 @@ def encrypt(key: bytes, plaintext: bytes, aad: bytes) -> bytes:
 
 
 def decrypt(key: bytes, blob: bytes, aad: bytes) -> bytes:
-    """Encargado de descifrar cualquier modificación (nonce, ct, tag o AAD) -> IntegrityError."""
+    """Descifra y verifica el tag: cualquier modificación (nonce, ct, tag o AAD) -> IntegrityError."""
+    if len(key) != KEY_LEN:
+        raise ValueError("La clave AES-256 debe tener 32 bytes")
     if len(blob) < NONCE_LEN + TAG_LEN:
         raise IntegrityError("Cifrado demasiado corto")
     nonce, ct = blob[:NONCE_LEN], blob[NONCE_LEN:]
     try:
         pt = AESGCM(key).decrypt(nonce, ct, aad)
     except InvalidTag as exc:
-        log.warning("AES-256-GCM: tag de autenticación INVÁLIDO -> datos rechazados")
+        log.warning("AES-256-GCM (clave=256 bits): tag de autenticación de 128 bits INVÁLIDO -> datos rechazados")
         raise IntegrityError("Tag de autenticación inválido (datos manipulados o clave incorrecta)") from exc
-    log.debug("AES-256-GCM descifrar: tag verificado OK")
+    log.debug("AES-256-GCM descifrar: clave=256 bits nonce=96 bits tag=128 bits verificado OK (pt=%dB)", len(pt))
     return pt

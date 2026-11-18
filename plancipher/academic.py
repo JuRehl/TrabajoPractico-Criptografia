@@ -1,7 +1,8 @@
 """Expediente académico: matrícula, plan de estudios y notas.
 
-* Matrícula: la secretaría firma (usuario, clave pública X25519). Así sabe que
-  cifra para la clave auténtica del estudiante y no para una sustituida.
+* Matrícula: la secretaría (AC subordinada) emite un certificado X.509 que liga el
+  usuario con su clave pública X25519. Así se cifra para la clave auténtica del
+  estudiante y no para una sustituida.
 * Plan de estudios: público, firmado por la secretaría (integridad/autenticidad).
 * Notas: cifradas con una CEK que se entrega al estudiante con ECIES y firmadas
   (ECDSA P-256) sobre todo el sobre (cabecera + clave sellada + cifrado).
@@ -65,16 +66,19 @@ class AcademicService:
         rec = self.users.get(username)
         if rec is None:
             raise ValidationError("Usuario inexistente")
-        self.users.set_enrollment(username, sec.sign("enroll", {"username": username, "pub": rec["pub"]}))
+        pub = hybrid.public_from_bytes(b64d(rec["pub"]))
+        self.users.set_certificate(username, sec.certify_student(username, pub))
 
     def _verified_public_key(self, anchor: TrustAnchor, username: str):
         rec = self.users.get(username)
         if rec is None:
             raise ValidationError("Usuario inexistente")
-        if not rec.get("enrollment"):
-            raise ValidationError("El estudiante no está matriculado (la secretaría debe firmar su matrícula)")
-        anchor.verify("enroll", {"username": username, "pub": rec["pub"]}, rec["enrollment"])
-        return hybrid.public_from_bytes(b64d(rec["pub"]))
+        if not rec.get("cert"):
+            raise ValidationError("El estudiante no está matriculado (la secretaría debe emitir su certificado)")
+        pub = anchor.verify_student(username, rec["cert"])
+        if hybrid.public_to_bytes(pub) != b64d(rec["pub"]):
+            raise IntegrityError("La clave pública del estudiante no coincide con su certificado")
+        return pub
 
     # Plan de estudios 
     def publish_plan(self, sec: Secretaria, plan: dict) -> None:

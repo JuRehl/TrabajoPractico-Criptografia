@@ -153,28 +153,31 @@ def student_tab() -> None:
                 except PlanCipherError as exc:
                     show_error(exc)
                 else:
-                    done("Registrado. Pide a la secretaría que firme tu matrícula.")
+                    done("Registrado. Pide a la secretaría que emita tu certificado de matrícula.")
 
 
 def secretaria_tab() -> None:
-    if not (DATA / "secretaria" / "cert.pem").exists():
-        st.info("La secretaría aún no está inicializada.")
+    if not (DATA / "pki" / "root_cert.pem").exists():
+        st.info("La secretaría aún no está inicializada. Se creará una PKI de dos niveles: "
+                "AC raíz → AC subordinada (secretaría) + CRL.")
         with st.form("init_sec"):
-            passphrase = st.text_input("Passphrase (mín. 12 caracteres)", type="password")
-            again = st.text_input("Repite la passphrase", type="password")
-            if st.form_submit_button("Inicializar secretaría", type="primary"):
-                if passphrase != again:
+            root_pass = st.text_input("Passphrase de la AC raíz (mín. 12 caracteres)", type="password")
+            root_again = st.text_input("Repite la passphrase de la AC raíz", type="password")
+            passphrase = st.text_input("Passphrase de la secretaría (mín. 12, distinta)", type="password")
+            again = st.text_input("Repite la passphrase de la secretaría", type="password")
+            if st.form_submit_button("Inicializar PKI y secretaría", type="primary"):
+                if passphrase != again or root_pass != root_again:
                     st.error("Las passphrases no coinciden")
                 else:
                     try:
-                        fingerprint = Secretaria.init(DATA, passphrase)
+                        fingerprint = Secretaria.init(DATA, passphrase, root_passphrase=root_pass)
                         sec = Secretaria.unlock(DATA, passphrase)
                         acad.publish_plan(sec, json.loads(SAMPLE_PLAN.read_text(encoding="utf-8")))
                     except PlanCipherError as exc:
                         show_error(exc)
                     else:
-                        done("Secretaría creada y plan publicado y firmado. "
-                             f"Huella SHA-256 del certificado: `{fingerprint}`")
+                        done("PKI creada y plan publicado y firmado. "
+                             f"Huella SHA-256 de la AC raíz: `{fingerprint}`")
         return
 
     sec = st.session_state.get("sec")
@@ -191,7 +194,8 @@ def secretaria_tab() -> None:
         return
 
     head, out = st.columns([4, 1])
-    head.caption(f"Huella SHA-256 del certificado: `{sec.anchor.fingerprint}`")
+    head.caption(f"AC raíz `{sec.anchor.fingerprint[:16]}…` → secretaría "
+                 f"`{sec.anchor.secretaria_fingerprint[:16]}…` (cadena y CRL verificadas)")
     if out.button("Bloquear"):
         st.session_state.pop("sec", None)
         st.rerun()
@@ -201,16 +205,16 @@ def secretaria_tab() -> None:
         st.info("No hay estudiantes registrados.")
         return
 
-    st.subheader("Firmar matrícula")
+    st.subheader("Matrícula (certificado X.509)")
     with st.form("enroll"):
         student = st.selectbox("Estudiante", names, key="enroll_student")
-        if st.form_submit_button("Firmar matrícula", type="primary"):
+        if st.form_submit_button("Emitir certificado", type="primary"):
             try:
                 acad.enroll(sec, student)
             except PlanCipherError as exc:
                 show_error(exc)
             else:
-                done(f"Matrícula de {student} firmada")
+                done(f"Certificado X.509 de {student} emitido: ya puede recibir notas")
 
     st.subheader("Emitir nota")
     try:

@@ -5,27 +5,43 @@ Aplicación de línea de comandos para que los estudiantes consulten su **planni
 
 ## Instalación y ejecución (entorno limpio)
 
+Linux / macOS:
+
 ```bash
 python3 -m venv .venv && source .venv/bin/activate   # Python >= 3.10
 pip install -r requirements.txt                       # cryptography==50.0.2
-python -m unittest discover -s tests -t .             # 75 pruebas, positivas y negativas
+python -m unittest discover -s tests -t .             # 131 pruebas, funcionales y de ataques
 bash scripts/demo.sh                                  # demo completa con manipulaciones
 ```
+
+Windows (PowerShell):
+
+```powershell
+py -m venv .venv
+.venv\Scripts\Activate.ps1                           # si está bloqueado: Set-ExecutionPolicy -Scope Process Bypass
+pip install -r requirements.txt
+python -m unittest discover -s tests -t .
+bash scripts/demo.sh                                  # con Git Bash; usa el Python de .venv automáticamente
+```
+
+En PowerShell las variables de entorno se fijan con `$env:PLANCIPHER_PASSWORD = "..."`.
 
 Uso manual (los secretos se piden sin eco; `--debug` muestra algoritmos y longitudes, nunca secretos):
 
 ```bash
-python -m plancipher init-secretaria                  # clave de firma, certificado y plan firmado
+python -m plancipher init-secretaria                  # PKI (AC raíz -> secretaría + CRL) y plan firmado
 python -m plancipher register alice
-python -m plancipher enroll alice                     # [secretaría] firma la matrícula
+python -m plancipher enroll alice                     # [secretaría] emite su certificado X.509 (matrícula)
 python -m plancipher issue-grade alice --subject CRIPTO --grade 8.5 --term 2026-1C
 python -m plancipher add-planning alice --date 2026-11-10 --time 09:00 --text "Clase de Cripto"
 python -m plancipher planning alice
 python -m plancipher grades alice                     # verifica firma + descifra
 python -m plancipher pending alice
+python -m plancipher revoke-secretaria                # [AC raíz] revoca la secretaría (CRL)
 ```
 
-Para scripts: `PLANCIPHER_PASSWORD`, `PLANCIPHER_SECRETARIA_PASS`, `PLANCIPHER_DATA`, `PLANCIPHER_TRUST_FP`.
+Para scripts: `PLANCIPHER_PASSWORD`, `PLANCIPHER_SECRETARIA_PASS`, `PLANCIPHER_ROOT_PASS`, `PLANCIPHER_DATA`,
+`PLANCIPHER_TRUST_FP` (huella SHA-256 de la **AC raíz**).
 Códigos de salida: `0` OK, `1` error controlado, `3` datos **rechazados** por integridad.
 
 ## Interfaz web (opcional, Streamlit)
@@ -39,7 +55,8 @@ Usa exactamente los mismos servicios y la misma criptografía que la CLI; `app.p
 Pestaña **Estudiante** (registro, login, planning, notas verificadas, pendientes) y pestaña **Secretaría**
 (inicializar, firmar matrículas, emitir notas). Las sesiones viven en la memoria del servidor y se descartan al
 cerrar sesión. Es una demo **local**: Streamlit no aporta TLS, por lo que no debe exponerse en red
-(limitación a mencionar en la memoria). Tras instalar, fija la versión exacta con `pip freeze | grep -i streamlit`.
+(limitación a mencionar en la memoria). Versión fijada: `streamlit==1.67.0`. Las pruebas de la web
+(`tests/test_web.py`) se omiten automáticamente si Streamlit no está instalado.
 
 ## Estructura
 
@@ -48,7 +65,8 @@ plancipher/crypto/   solo criptografía: kdf, aead, hybrid, signing, keystore, c
 plancipher/          lógica: auth, planning, academic (matrícula/plan/notas), secretaria, storage
 plancipher/cli.py    solo entrada/salida (CLI)
 app.py               solo entrada/salida (web Streamlit, opcional)
-tests/               unittest: crypto, auth, planning, academic, cli (extremo a extremo)
+tests/               unittest: crypto, auth, planning, academic (ataques), functional (casos de uso),
+                     cli y web (extremo a extremo; web se omite sin Streamlit)
 ```
 
 ## Decisiones criptográficas
@@ -60,14 +78,15 @@ tests/               unittest: crypto, auth, planning, academic, cli (extremo a 
 | Claves de usuario | X25519 | La privada se guarda cifrada con la KEK (AES-GCM, AAD = usuario). |
 | Entrega de CEK al estudiante | ECIES: X25519 efímero + HKDF-SHA256 + AES-256-GCM | La secretaría solo necesita la clave pública del estudiante. |
 | Integridad | AES-GCM (tag) en datos privados; ECDSA en datos públicos | No se usa HMAC separado porque AEAD ya autentica. |
-| Firma digital | ECDSA P-256 + SHA-256 | Firma matrículas, plan de estudios y notas (sobre cabecera + clave sellada + cifrado). Separación de dominios en el mensaje firmado. |
-| Clave de firma | scrypt + AES-256-GCM con passphrase | Nunca en claro en disco; certificado X.509 autofirmado como ancla de confianza. Al cargarlo se validan fechas, autofirma, `basicConstraints` (CA), `keyUsage` (firma de datos y de certificados), curva y huella opcional. |
+| Firma digital | ECDSA P-256 + SHA-256 | Firma certificados de estudiante, plan de estudios y notas (sobre cabecera + clave sellada + cifrado). Separación de dominios en el mensaje firmado. |
+| Claves de firma | scrypt + AES-256-GCM con passphrase | La clave de la AC raíz y la de la secretaría se guardan cifradas, cada una con su passphrase (deben ser distintas). Nunca en claro en disco. |
+| PKI X.509 | AC raíz → AC subordinada (secretaría) + CRL | **Raíz** autofirmada (10 años, `CA, pathLen=1`, `keyCertSign`+`cRLSign`): única ancla de confianza, solo firma certificados y la CRL. **Secretaría** emitida por la raíz (2 años, sin superar a la raíz, `CA, pathLen=0`, `digitalSignature`): emite los certificados de estudiante y firma plan y notas. **Estudiantes** (entidad final, 1 año, `CA=false`, solo `keyAgreement`): certificado X.509 emitido por la secretaría con `CN=usuario` y su clave pública X25519. Al cargar se validan autofirma de la raíz, emisor y firma de la subordinada, fechas, extensiones, curva P-256, **CRL** (firmada por la raíz y vigente) y huella opcional de la raíz. |
 
 Aleatoriedad: siempre `os.urandom` (CSPRNG del sistema). No hay claves, IVs ni nonces constantes.
 
 ## Fallos seguros
 
-Cualquier tag, firma, certificado o matrícula inválidos **rechaza** el dato (no se muestra) y se informa;
+Cualquier tag, firma o certificado inválidos **rechaza** el dato (no se muestra) y se informa;
 la CLI devuelve código 3. Login con mensaje genérico, coste scrypt también para usuarios inexistentes
 y bloqueo exponencial tras 5 fallos.
 
@@ -76,14 +95,17 @@ y bloqueo exponencial tras 5 fallos.
 1. **Manipulación de datos en disco** (ciphertext, tag, firma, cabecera): AEAD + ECDSA → rechazo.
 2. **Cambio de contexto** (copiar un registro a otro usuario/id): AAD y firma cubren propietario e id.
 3. **Repetición / rollback de notas**: id único, `seq` creciente por estudiante, nota vigente = mayor `seq`.
-4. **Sustitución de clave pública** del estudiante: la matrícula firmada liga usuario↔clave.
+4. **Sustitución de clave pública** del estudiante: su certificado X.509 (emitido por la secretaría) liga usuario↔clave; se comprueba emisor, firma, `CN` y que la clave coincida.
 5. **Fuerza bruta de contraseñas**: scrypt costoso, sal única, bloqueo progresivo.
 6. **Escalada de privilegios**: la secretaría no es un nombre de usuario; se prueba con su clave de firma.
-7. **Secretaría falsa**: las firmas se verifican contra el certificado fijado (huella opcional `--trust-fingerprint`).
+7. **Secretaría falsa**: su certificado debe estar emitido por la AC raíz; sustituir toda la PKI se detecta fijando la huella de la raíz (`--trust-fingerprint`).
+8. **Clave de la secretaría comprometida**: la AC raíz la revoca (`revoke-secretaria`) y la CRL hace que todas sus firmas se rechacen.
 
 ## Limitaciones conocidas (para la memoria / defensa)
 
-* Ancla de confianza autofirmada de un solo nivel y sin revocación (CRL/OCSP): en producción, una PKI con CA raíz e intermedias y consulta del estado del certificado.
+* PKI de dos niveles local: la clave de la AC raíz vive en el mismo disco (en producción estaría offline o en un HSM), no hay OCSP ni distribución de la CRL, y tras revocar no hay comando para emitir una secretaría nueva (re-certificación).
+* Los certificados de estudiante no tienen CRL propia: para "revocar" a un estudiante se re-emite su certificado o se borra.
+* Al revocar se rechaza todo lo firmado por la secretaría, también lo anterior a la revocación (no hay sellado de tiempo).
 * La lista de contraseñas comunes es corta; en producción se usaría una lista grande de contraseñas filtradas.
 * Un atacante con escritura en disco puede **borrar** el último registro (rollback por borrado) sin que se detecte;
   se resolvería con un contador/manifiesto firmado.

@@ -148,60 +148,179 @@ class KeystoreTests(unittest.TestCase):
 
 
 class CertTests(unittest.TestCase):
+    """PKI de dos niveles: AC raíz -> AC subordinada (secretaría) + CRL."""
+
     def setUp(self):
-        self.key = signing.generate_signing_key()
-        self.cert = certs.create_self_signed(self.key, "Test")
-        self.pem = certs.to_pem(self.cert)
+        self.root_key = signing.generate_signing_key()
+        self.root = certs.create_root(self.root_key)
+        self.sub_key = signing.generate_signing_key()
+        self.sub = certs.issue_subordinate(self.root_key, self.root, self.sub_key.public_key())
+        self.crl = certs.create_crl(self.root_key, self.root)
 
-    def test_load_and_fingerprint_pin(self):
-        fp = certs.fingerprint(self.cert)
-        certs.load_trusted(self.pem, fp)
-        certs.load_trusted(self.pem, fp.upper())
-        with self.assertRaises(IntegrityError):
-            certs.load_trusted(self.pem, "00" * 32)
-
-    def test_expired_certificate_rejected(self):
-        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "viejo")])
-        now = dt.datetime.now(dt.timezone.utc)
-        old = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(self.key.public_key())
-               .serial_number(1).not_valid_before(now - dt.timedelta(days=10)).not_valid_after(now - dt.timedelta(days=1))
-               .sign(self.key, hashes.SHA256()))
-        with self.assertRaises(IntegrityError):
-            certs.load_trusted(certs.to_pem(old))
-
-    def test_not_self_signed_rejected(self):
-        # Certificado cuyo emisor es otro (firmado por otra clave) no es un ancla autofirmada válida.
-        other = signing.generate_signing_key()
+    def _builder(self, key, *, issuer_name=None, days=1, start_days=0):
         name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "x")])
         now = dt.datetime.now(dt.timezone.utc)
-        forged = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(self.key.public_key())
-                  .serial_number(2).not_valid_before(now).not_valid_after(now + dt.timedelta(days=1))
-                  .sign(other, hashes.SHA256()))
+        return (x509.CertificateBuilder().subject_name(name).issuer_name(issuer_name or name)
+                .public_key(key.public_key()).serial_number(x509.random_serial_number())
+                .not_valid_before(now - dt.timedelta(days=start_days, minutes=1))
+                .not_valid_after(now + dt.timedelta(days=days)))
+
+    @staticmethod
+    def _ext(b, *, ca=True, path_length=1, digital_signature=False, key_cert_sign=True, crl_sign=True):
+        return b.add_extension(x509.BasicConstraints(ca=ca, path_length=path_length), critical=True).add_extension(
+            x509.KeyUsage(digital_signature=digital_signature, key_cert_sign=key_cert_sign, crl_sign=crl_sign,
+                          content_commitment=False, key_encipherment=False, data_encipherment=False,
+                          key_agreement=False, encipher_only=False, decipher_only=False), critical=True)
+
+    def _sub(self, **ext):
+        """Subordinada emitida por la raíz con extensiones a medida."""
+        b = self._builder(self.sub_key, issuer_name=self.root.subject)
+        opts = dict(path_length=0, digital_signature=True) | ext
+        return certs.to_pem(self._ext(b, **opts).sign(self.root_key, hashes.SHA256()))
+
+    def verify(self, sub_pem=None, crl=None):
+        return certs.verify_subordinate(sub_pem or certs.to_pem(self.sub), self.root, crl or self.crl)
+
+    # --- AC raíz ---------------------------------------------------------
+    def test_root_load_and_fingerprint_pin(self):
+        pem, fp = certs.to_pem(self.root), certs.fingerprint(self.root)
+        certs.load_root(pem, fp)
+        certs.load_root(pem, fp.upper())
         with self.assertRaises(IntegrityError):
-            certs.load_trusted(certs.to_pem(forged))
+            certs.load_root(pem, "00" * 32)
+        with self.assertRaises(IntegrityError):  # la huella de la subordinada no sirve como ancla
+            certs.load_root(pem, certs.fingerprint(self.sub))
 
-    def test_garbage_rejected(self):
-        with self.assertRaises(IntegrityError):
-            certs.load_trusted(b"no es un certificado")
-
-    def _cert(self, *, ca=True, digital_signature=True, key_cert_sign=True, with_extensions=True):
-        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "uso")])
-        now = dt.datetime.now(dt.timezone.utc)
-        b = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(self.key.public_key())
-             .serial_number(3).not_valid_before(now - dt.timedelta(minutes=1)).not_valid_after(now + dt.timedelta(days=1)))
-        if with_extensions:
-            b = b.add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True).add_extension(
-                x509.KeyUsage(digital_signature=digital_signature, key_cert_sign=key_cert_sign, crl_sign=False,
-                              content_commitment=False, key_encipherment=False, data_encipherment=False,
-                              key_agreement=False, encipher_only=False, decipher_only=False), critical=True)
-        return certs.to_pem(b.sign(self.key, hashes.SHA256()))
-
-    def test_certificate_usage_is_checked(self):
-        certs.load_trusted(self._cert())  # válido: CA con firma de datos y de certificados
-        for bad in (self._cert(with_extensions=False), self._cert(ca=False),
-                    self._cert(key_cert_sign=False), self._cert(digital_signature=False)):
+    def test_root_must_be_self_signed_ca(self):
+        other = signing.generate_signing_key()
+        forged = self._ext(self._builder(self.root_key)).sign(other, hashes.SHA256())
+        expired = self._ext(self._builder(self.root_key, days=-1, start_days=10)).sign(self.root_key, hashes.SHA256())
+        for bad in (forged, expired):
             with self.assertRaises(IntegrityError):
-                certs.load_trusted(bad)
+                certs.load_root(certs.to_pem(bad))
+        with self.assertRaises(IntegrityError):  # la subordinada no es autofirmada: no puede ser raíz
+            certs.load_root(certs.to_pem(self.sub))
+        with self.assertRaises(IntegrityError):
+            certs.load_root(b"no es un certificado")
+
+    def test_root_usage_is_checked(self):
+        def root(**ext):
+            return certs.to_pem(self._ext(self._builder(self.root_key), **ext).sign(self.root_key, hashes.SHA256()))
+        certs.load_root(root())
+        no_ext = certs.to_pem(self._builder(self.root_key).sign(self.root_key, hashes.SHA256()))
+        for bad in (no_ext, root(ca=False, path_length=None), root(path_length=0),
+                    root(key_cert_sign=False), root(crl_sign=False)):
+            with self.assertRaises(IntegrityError):
+                certs.load_root(bad)
+
+    # --- cadena subordinada -> raíz ---------------------------------------
+    def test_valid_chain(self):
+        cert = self.verify()
+        self.assertEqual(cert.issuer, self.root.subject)
+        self.assertLessEqual(cert.not_valid_after_utc, self.root.not_valid_after_utc)
+
+    def test_subordinate_signed_by_other_root_rejected(self):
+        other_key = signing.generate_signing_key()
+        other_root = certs.create_root(other_key)  # mismo nombre "PlanCipher AC Raiz", distinta clave
+        fake = certs.issue_subordinate(other_key, other_root, self.sub_key.public_key())
+        with self.assertRaises(IntegrityError):
+            self.verify(certs.to_pem(fake))
+
+    def test_self_signed_secretaria_rejected(self):
+        """El modelo antiguo (secretaría autofirmada) ya no es aceptado: debe colgar de la raíz."""
+        b = self._ext(self._builder(self.sub_key), path_length=0, digital_signature=True)
+        with self.assertRaises(IntegrityError):
+            self.verify(certs.to_pem(b.sign(self.sub_key, hashes.SHA256())))
+
+    def test_subordinate_usage_is_checked(self):
+        self.verify(self._sub())
+        for bad in (self._sub(ca=False, path_length=None), self._sub(path_length=1),
+                    self._sub(digital_signature=False)):
+            with self.assertRaises(IntegrityError):
+                self.verify(bad)
+
+    def test_expired_subordinate_rejected(self):
+        b = self._ext(self._builder(self.sub_key, issuer_name=self.root.subject, days=-1, start_days=10),
+                      path_length=0, digital_signature=True)
+        with self.assertRaises(IntegrityError):
+            self.verify(certs.to_pem(b.sign(self.root_key, hashes.SHA256())))
+
+    def test_subordinate_outliving_root_rejected(self):
+        b = self._ext(self._builder(self.sub_key, issuer_name=self.root.subject, days=ROOT_PLUS),
+                      path_length=0, digital_signature=True)
+        with self.assertRaises(IntegrityError):
+            self.verify(certs.to_pem(b.sign(self.root_key, hashes.SHA256())))
+
+    # --- CRL --------------------------------------------------------------
+    def test_revoked_subordinate_rejected(self):
+        crl = certs.create_crl(self.root_key, self.root, [self.sub.serial_number])
+        crl = certs.load_crl(certs.to_pem(crl), self.root)
+        with self.assertRaises(IntegrityError):
+            self.verify(crl=crl)
+        self.verify(crl=certs.load_crl(certs.to_pem(certs.create_crl(self.root_key, self.root, [12345])), self.root))
+
+    def test_crl_must_be_signed_by_root_and_fresh(self):
+        other_key = signing.generate_signing_key()
+        forged = certs.create_crl(other_key, certs.create_root(other_key))  # emisor con mismo nombre
+        now = dt.datetime.now(dt.timezone.utc)
+        expired = (x509.CertificateRevocationListBuilder().issuer_name(self.root.subject)
+                   .last_update(now - dt.timedelta(days=10)).next_update(now - dt.timedelta(days=1))
+                   .sign(self.root_key, hashes.SHA256()))
+        for bad in (certs.to_pem(forged), certs.to_pem(expired), b"no es una CRL"):
+            with self.assertRaises(IntegrityError):
+                certs.load_crl(bad, self.root)
+
+
+    # --- certificados de estudiante (entidad final) -------------------------
+    def _student_pem(self, *, username="alice", key=None, issuer_key=None, issuer=None, ca=False,
+                     key_agreement=True, digital_signature=False, days=1, start_days=0):
+        pub = key or hybrid.generate_keypair()[1]
+        issuer = issuer or self.sub
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, username)])
+        now = dt.datetime.now(dt.timezone.utc)
+        b = (x509.CertificateBuilder().subject_name(name).issuer_name(issuer.subject).public_key(pub)
+             .serial_number(x509.random_serial_number())
+             .not_valid_before(now - dt.timedelta(days=start_days, minutes=1)).not_valid_after(now + dt.timedelta(days=days))
+             .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True)
+             .add_extension(x509.KeyUsage(digital_signature=digital_signature, key_cert_sign=False, crl_sign=False,
+                                          content_commitment=False, key_encipherment=False, data_encipherment=False,
+                                          key_agreement=key_agreement, encipher_only=False, decipher_only=False),
+                            critical=True))
+        return certs.to_pem(b.sign(issuer_key or self.sub_key, hashes.SHA256()))
+
+    def test_student_certificate_roundtrip(self):
+        _, pub = hybrid.generate_keypair()
+        cert = certs.issue_student(self.sub_key, self.sub, pub, "alice")
+        got = certs.verify_student(certs.to_pem(cert), self.sub, "alice")
+        self.assertEqual(hybrid.public_to_bytes(got), hybrid.public_to_bytes(pub))
+        self.assertEqual(cert.issuer, self.sub.subject)
+        self.assertLessEqual(cert.not_valid_after_utc, self.sub.not_valid_after_utc)
+        self.assertFalse(cert.extensions.get_extension_for_class(x509.BasicConstraints).value.ca)
+        certs.verify_student(self._student_pem(), self.sub, "alice")  # el constructor del test también es válido
+
+    def test_student_certificate_bound_to_username(self):
+        with self.assertRaises(IntegrityError):
+            certs.verify_student(self._student_pem(username="bob"), self.sub, "alice")
+
+    def test_student_certificate_must_come_from_secretaria(self):
+        other_key = signing.generate_signing_key()
+        other_sub = certs.issue_subordinate(self.root_key, self.root, other_key.public_key())  # mismo nombre
+        for bad in (self._student_pem(issuer=self.root, issuer_key=self.root_key),   # la raíz no emite estudiantes
+                    self._student_pem(issuer_key=other_key),                         # firma de otra clave
+                    self._student_pem(issuer=other_sub, issuer_key=other_key)):
+            with self.assertRaises(IntegrityError):
+                certs.verify_student(bad, self.sub, "alice")
+
+    def test_student_certificate_usage_validity_and_key_type(self):
+        ec_pub = signing.generate_signing_key().public_key()
+        for bad in (self._student_pem(ca=True), self._student_pem(key_agreement=False),
+                    self._student_pem(digital_signature=True), self._student_pem(days=-1, start_days=10),
+                    self._student_pem(key=ec_pub), b"no es un certificado"):
+            with self.assertRaises(IntegrityError):
+                certs.verify_student(bad, self.sub, "alice")
+
+
+ROOT_PLUS = certs.ROOT_DAYS + 30
 
 
 class EncodingTests(unittest.TestCase):

@@ -5,10 +5,11 @@ import unittest
 from pathlib import Path
 
 from plancipher.academic import pending_subjects
+from plancipher.crypto import hybrid
 from plancipher.crypto.encoding import b64d, b64e
 from plancipher.errors import (AuthenticationError, IntegrityError, ReplayError, ValidationError)
 from plancipher.secretaria import Secretaria, TrustAnchor
-from tests.helpers import FAST, PASS_A, SEC_PASS, SystemCase, TmpDirCase
+from tests.helpers import FAST, PASS_A, ROOT_PASS, SEC_PASS, SystemCase, TmpDirCase
 
 
 def flip_b64(text: str, index: int = 20) -> str:
@@ -73,7 +74,7 @@ class GradeTests(SystemCase):
 
     def test_record_forged_by_a_different_secretaria_rejected(self):
         with tempfile.TemporaryDirectory() as other_dir:
-            Secretaria.init(Path(other_dir), SEC_PASS, FAST)
+            Secretaria.init(Path(other_dir), SEC_PASS, FAST, root_passphrase=ROOT_PASS)
             rogue = Secretaria.unlock(Path(other_dir), SEC_PASS)
             rogue_acad = type(self.acad)(Path(other_dir), self.users)
             rogue_acad.publish_plan(rogue, {"degree": "x", "subjects": [{"code": "CRIPTO", "name": "x", "credits": 6}]})
@@ -136,11 +137,46 @@ class GradeTests(SystemCase):
         with self.assertRaises(IntegrityError):
             self.acad.issue_grade(self.sec, "alice", "CRIPTO", 9.0, "2026-1C")
 
+    def test_certificate_swapped_with_other_student(self):
+        """Copiar el certificado (y la clave pública) de bob en alice: el CN no coincide."""
+        self.rewrite_json("users.json", lambda d: d["alice"].update(pub=d["bob"]["pub"], cert=d["bob"]["cert"]))
+        with self.assertRaises(IntegrityError):
+            self.acad.issue_grade(self.sec, "alice", "CRIPTO", 9.0, "2026-1C")
+
+    def test_tampered_or_garbage_student_certificate(self):
+        def tamper(d):
+            pem = d["alice"]["cert"]
+            i = len(pem) // 2
+            d["alice"]["cert"] = pem[:i] + ("A" if pem[i] != "A" else "B") + pem[i + 1:]
+        self.rewrite_json("users.json", tamper)
+        with self.assertRaises(IntegrityError):
+            self.acad.issue_grade(self.sec, "alice", "CRIPTO", 9.0, "2026-1C")
+        self.rewrite_json("users.json", lambda d: d["alice"].update(cert=12345))
+        with self.assertRaises(IntegrityError):
+            self.acad.issue_grade(self.sec, "alice", "CRIPTO", 9.0, "2026-1C")
+
+    def test_student_certificate_from_rogue_secretaria(self):
+        with tempfile.TemporaryDirectory() as other_dir:
+            Secretaria.init(Path(other_dir), SEC_PASS, FAST, root_passphrase=ROOT_PASS)
+            rogue = Secretaria.unlock(Path(other_dir), SEC_PASS)
+            mallory_pub = hybrid.generate_keypair()[1]
+            fake = rogue.certify_student("alice", mallory_pub)
+        self.rewrite_json("users.json", lambda d: d["alice"].update(
+            cert=fake, pub=b64e(hybrid.public_to_bytes(mallory_pub))))
+        with self.assertRaises(IntegrityError):
+            self.acad.issue_grade(self.sec, "alice", "CRIPTO", 9.0, "2026-1C")
+
     def test_invalid_grade_subject_and_term(self):
         for subject, grade, term in (("CRIPTO", 11, "2026-1C"), ("CRIPTO", -1, "2026-1C"), ("CRIPTO", True, "2026-1C"),
                                      ("NOEXISTE", 5, "2026-1C"), ("CRIPTO", 5, "enero")):
             with self.assertRaises(ValidationError, msg=(subject, grade, term)):
                 self.acad.issue_grade(self.sec, "alice", subject, grade, term)
+
+    def test_revoked_secretaria_grades_no_longer_trusted(self):
+        self.acad.issue_grade(self.sec, "alice", "CRIPTO", 9.0, "2026-1C")
+        Secretaria.revoke(self.dir, ROOT_PASS)
+        with self.assertRaises(IntegrityError):
+            TrustAnchor.load(self.dir)
 
     # --- plan firmado ---------------------------------------------------
     def test_plan_signature_checked(self):
@@ -152,41 +188,41 @@ class GradeTests(SystemCase):
 
 class SecretariaTests(TmpDirCase):
     def test_init_unlock_and_wrong_passphrase(self):
-        fp = Secretaria.init(self.dir, SEC_PASS, FAST)
+        fp = Secretaria.init(self.dir, SEC_PASS, FAST, root_passphrase=ROOT_PASS)
         Secretaria.unlock(self.dir, SEC_PASS, expected_fingerprint=fp)
         with self.assertRaises(AuthenticationError):
             Secretaria.unlock(self.dir, "passphrase-incorrecta-1")
 
     def test_double_init_and_weak_passphrase(self):
         with self.assertRaises(ValidationError):
-            Secretaria.init(self.dir, "corta", FAST)
+            Secretaria.init(self.dir, "corta", FAST, root_passphrase=ROOT_PASS)
         with self.assertRaises(ValidationError):  # larga pero de diccionario
-            Secretaria.init(self.dir, "Contraseña-123456", FAST)
-        Secretaria.init(self.dir, SEC_PASS, FAST)
+            Secretaria.init(self.dir, "Contraseña-123456", FAST, root_passphrase=ROOT_PASS)
+        Secretaria.init(self.dir, SEC_PASS, FAST, root_passphrase=ROOT_PASS)
         with self.assertRaises(ValidationError):
-            Secretaria.init(self.dir, SEC_PASS, FAST)
+            Secretaria.init(self.dir, SEC_PASS, FAST, root_passphrase=ROOT_PASS)
 
     def test_wrong_pinned_fingerprint(self):
-        Secretaria.init(self.dir, SEC_PASS, FAST)
+        Secretaria.init(self.dir, SEC_PASS, FAST, root_passphrase=ROOT_PASS)
         with self.assertRaises(IntegrityError):
             TrustAnchor.load(self.dir, expected_fingerprint="00" * 32)
 
     def test_tampered_key_file(self):
-        Secretaria.init(self.dir, SEC_PASS, FAST)
+        Secretaria.init(self.dir, SEC_PASS, FAST, root_passphrase=ROOT_PASS)
         self.rewrite_json("secretaria/signing_key.json", lambda d: d.update(blob=flip_b64(d["blob"], 15)))
         with self.assertRaises(AuthenticationError):
             Secretaria.unlock(self.dir, SEC_PASS)
 
     def test_tampered_scrypt_params_in_key_file(self):
-        Secretaria.init(self.dir, SEC_PASS, FAST)
+        Secretaria.init(self.dir, SEC_PASS, FAST, root_passphrase=ROOT_PASS)
         self.rewrite_json("secretaria/signing_key.json", lambda d: d.update(n=2**30))
         with self.assertRaises(IntegrityError):
             Secretaria.unlock(self.dir, SEC_PASS)
 
     def test_certificate_swapped_for_another_one(self):
-        Secretaria.init(self.dir, SEC_PASS, FAST)
+        Secretaria.init(self.dir, SEC_PASS, FAST, root_passphrase=ROOT_PASS)
         with tempfile.TemporaryDirectory() as other:
-            Secretaria.init(Path(other), SEC_PASS, FAST)
+            Secretaria.init(Path(other), SEC_PASS, FAST, root_passphrase=ROOT_PASS)
             other_cert = (Path(other) / "secretaria" / "cert.pem").read_bytes()
         (self.dir / "secretaria" / "cert.pem").write_bytes(other_cert)
         with self.assertRaises(IntegrityError):  # la clave descifrada no corresponde al certificado
@@ -194,6 +230,62 @@ class SecretariaTests(TmpDirCase):
 
     def test_missing_secretaria(self):
         with self.assertRaises(ValidationError):
+            TrustAnchor.load(self.dir)
+
+    # --- PKI: AC raíz -> AC subordinada -------------------------------------
+    def test_root_passphrase_policy(self):
+        for bad_root in ("corta", "Contraseña-123456", SEC_PASS):  # corta, de diccionario, igual a la de la secretaría
+            with self.assertRaises(ValidationError, msg=bad_root):
+                Secretaria.init(self.dir, SEC_PASS, FAST, root_passphrase=bad_root)
+
+    def test_pin_is_root_fingerprint(self):
+        fp = Secretaria.init(self.dir, SEC_PASS, FAST, root_passphrase=ROOT_PASS)
+        anchor = TrustAnchor.load(self.dir, expected_fingerprint=fp)
+        self.assertEqual(anchor.fingerprint, fp)
+        self.assertNotEqual(anchor.secretaria_fingerprint, fp)
+        with self.assertRaises(IntegrityError):  # fijar la huella de la subordinada no sirve
+            TrustAnchor.load(self.dir, expected_fingerprint=anchor.secretaria_fingerprint)
+
+    def test_whole_pki_swapped_is_caught_by_pin(self):
+        """Un atacante sustituye raíz, CRL y secretaría por las suyas: la cadena es coherente,
+        pero la huella fijada de la raíz legítima la delata."""
+        fp = Secretaria.init(self.dir, SEC_PASS, FAST, root_passphrase=ROOT_PASS)
+        with tempfile.TemporaryDirectory() as other:
+            Secretaria.init(Path(other), SEC_PASS, FAST, root_passphrase=ROOT_PASS)
+            for rel in ("pki/root_cert.pem", "pki/crl.pem", "secretaria/cert.pem"):
+                (self.dir / rel).write_bytes((Path(other) / rel).read_bytes())
+        with self.assertRaises(IntegrityError):
+            TrustAnchor.load(self.dir, expected_fingerprint=fp)
+
+    def test_subordinate_from_other_pki_rejected(self):
+        Secretaria.init(self.dir, SEC_PASS, FAST, root_passphrase=ROOT_PASS)
+        with tempfile.TemporaryDirectory() as other:
+            Secretaria.init(Path(other), SEC_PASS, FAST, root_passphrase=ROOT_PASS)
+            for rel in ("secretaria/cert.pem", "secretaria/signing_key.json"):
+                (self.dir / rel).write_bytes((Path(other) / rel).read_bytes())
+        with self.assertRaises(IntegrityError):  # no está emitida por NUESTRA AC raíz
+            TrustAnchor.load(self.dir)
+
+    def test_missing_or_tampered_crl(self):
+        Secretaria.init(self.dir, SEC_PASS, FAST, root_passphrase=ROOT_PASS)
+        crl = self.dir / "pki" / "crl.pem"
+        original = crl.read_bytes()
+        crl.write_bytes(original.replace(b"\n-----END", b"A\n-----END"))
+        with self.assertRaises(IntegrityError):
+            TrustAnchor.load(self.dir)
+        crl.unlink()
+        with self.assertRaises(ValidationError):
+            TrustAnchor.load(self.dir)
+
+    def test_revocation(self):
+        Secretaria.init(self.dir, SEC_PASS, FAST, root_passphrase=ROOT_PASS)
+        Secretaria.unlock(self.dir, SEC_PASS)
+        with self.assertRaises(AuthenticationError):  # solo la AC raíz puede revocar
+            Secretaria.revoke(self.dir, SEC_PASS)
+        Secretaria.revoke(self.dir, ROOT_PASS)
+        with self.assertRaises(IntegrityError):
+            Secretaria.unlock(self.dir, SEC_PASS)
+        with self.assertRaises(IntegrityError):
             TrustAnchor.load(self.dir)
 
 
