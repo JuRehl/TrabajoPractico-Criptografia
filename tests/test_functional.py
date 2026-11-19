@@ -79,7 +79,8 @@ class UserFunctionalTests(TmpDirCase):
     def test_new_user_starts_unenrolled_and_unlocked(self):
         self.users.register("alice", PASS_A)
         rec = self.users.get("alice")
-        self.assertEqual((rec["cert"], rec["failed"], rec["locked_until"]), (None, 0, 0))
+        self.assertEqual((rec["failed"], rec["locked_until"]), (0, 0))
+        self.assertNotIn("cert", rec)  # el certificado vive en la zona de la secretaría
         self.assertIsNone(self.users.get("nadie"))
 
     def test_valid_username_edge_cases(self):
@@ -162,7 +163,7 @@ class PlanFunctionalTests(SystemCase):
             self.acad.issue_grade(self.sec, "alice", "CRIPTO", 7.0, "2026-1C")
 
     def test_plan_not_published_yet(self):
-        (self.dir / "plan.json").unlink()
+        self.force_delete("secretaria/plan.json")
         with self.assertRaises(ValidationError):
             self.acad.load_plan(self.anchor)
 
@@ -185,7 +186,7 @@ class GradeFunctionalTests(SystemCase):
         self.acad.issue_grade(self.sec, "alice", "CRIPTO", 5.0, "2026-1C")
         self.acad.issue_grade(self.sec, "alice", "REDES", 5.0, "2026-1C")
         self.acad.issue_grade(self.sec, "bob", "CRIPTO", 5.0, "2026-1C")
-        seqs = [(r["header"]["student"], r["header"]["seq"]) for r in json.loads((self.dir / "records.json").read_text())]
+        seqs = [(r["header"]["student"], r["header"]["seq"]) for r in json.loads((self.dir / "secretaria" / "records.json").read_text())]
         self.assertEqual(seqs, [("alice", 1), ("alice", 2), ("bob", 1)])
 
     def test_grades_sorted_by_subject_with_issue_date(self):
@@ -215,7 +216,8 @@ class GradeFunctionalTests(SystemCase):
         from plancipher.crypto import hybrid
         from plancipher.crypto.encoding import b64d
         rec = self.users.get("alice")
-        cert = x509.load_pem_x509_certificate(rec["cert"].encode())
+        pem = json.loads((self.dir / "secretaria" / "matriculas.json").read_text())["alice"]
+        cert = x509.load_pem_x509_certificate(pem.encode())
         self.assertEqual(cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value, "alice")
         self.assertEqual(cert.issuer, self.anchor.cert.subject)  # emitido por la secretaría
         self.assertEqual(hybrid.public_to_bytes(cert.public_key()), b64d(rec["pub"]))

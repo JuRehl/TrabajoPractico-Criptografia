@@ -58,8 +58,11 @@ class GradesView:
 class AcademicService:
     def __init__(self, data_dir: Path, users: UserService):
         self.users = users
-        self.records = JsonStore(Path(data_dir) / "records.json")
-        self.plan_store = JsonStore(Path(data_dir) / "plan.json")
+        # Zona de la secretaría: solo ella escribe; para el estudiante es de solo lectura.
+        zone = Path(data_dir) / "secretaria"
+        self.records = JsonStore(zone / "records.json", protect=True)
+        self.plan_store = JsonStore(zone / "plan.json", protect=True)
+        self.enrollments = JsonStore(zone / "matriculas.json", protect=True)
 
     # Matrícula 
     def enroll(self, sec: Secretaria, username: str) -> None:
@@ -67,15 +70,18 @@ class AcademicService:
         if rec is None:
             raise ValidationError("Usuario inexistente")
         pub = hybrid.public_from_bytes(b64d(rec["pub"]))
-        self.users.set_certificate(username, sec.certify_student(username, pub))
+        enrollments = self.enrollments.load({})
+        enrollments[username] = sec.certify_student(username, pub)
+        self.enrollments.save(enrollments)
 
     def _verified_public_key(self, anchor: TrustAnchor, username: str):
         rec = self.users.get(username)
         if rec is None:
             raise ValidationError("Usuario inexistente")
-        if not rec.get("cert"):
+        enrollments = self.enrollments.load({})
+        if not isinstance(enrollments, dict) or not enrollments.get(username):
             raise ValidationError("El estudiante no está matriculado (la secretaría debe emitir su certificado)")
-        pub = anchor.verify_student(username, rec["cert"])
+        pub = anchor.verify_student(username, enrollments[username])
         if hybrid.public_to_bytes(pub) != b64d(rec["pub"]):
             raise IntegrityError("La clave pública del estudiante no coincide con su certificado")
         return pub

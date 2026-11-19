@@ -23,16 +23,29 @@ run --debug grades alice
 echo; echo "=== ATAQUE 1: contraseña incorrecta ==="
 PLANCIPHER_PASSWORD="contrasena-equivocada-1" "$PY" -m plancipher grades alice; echo "(salida: $?)"
 
-echo; echo "=== ATAQUE 2: modificar un byte del cifrado de una nota ==="
+echo; echo "=== ATAQUE 2: el estudiante intenta borrar las notas (separación de accesos) ==="
 "$PY" - <<'PY'
-import base64, json, os
-p = os.path.join(os.environ["PLANCIPHER_DATA"], "records.json")
+import os
+p = os.path.join(os.environ["PLANCIPHER_DATA"], "secretaria", "records.json")
+try:
+    os.remove(p)
+    print("BORRADO (no debería ocurrir)")
+except PermissionError as exc:
+    print(f"Denegado por el sistema: {exc.strerror} -> {os.path.relpath(p, os.environ['PLANCIPHER_DATA'])}")
+PY
+run grades alice
+
+echo; echo "=== ATAQUE 3: un atacante que se salta los permisos cambia un byte del cifrado de una nota ==="
+"$PY" - <<'PY'
+import base64, json, os, stat
+p = os.path.join(os.environ["PLANCIPHER_DATA"], "secretaria", "records.json")
+os.chmod(os.path.dirname(p), stat.S_IRWXU); os.chmod(p, stat.S_IRUSR | stat.S_IWUSR)
 d = json.load(open(p)); ct = bytearray(base64.b64decode(d[0]["ct"])); ct[20] ^= 1
 d[0]["ct"] = base64.b64encode(bytes(ct)).decode(); json.dump(d, open(p, "w"))
 PY
 run grades alice
 
-echo; echo "=== ATAQUE 3: modificar una entrada del planning ==="
+echo; echo "=== ATAQUE 4: modificar una entrada del planning ==="
 "$PY" - <<'PY'
 import base64, json, os
 p = os.path.join(os.environ["PLANCIPHER_DATA"], "planning.json")
@@ -41,7 +54,7 @@ d[0]["data"] = base64.b64encode(bytes(raw)).decode(); json.dump(d, open(p, "w"))
 PY
 run planning alice
 
-echo; echo "=== ATAQUE 4: la AC raíz revoca la secretaría (clave comprometida) ==="
+echo; echo "=== ATAQUE 5: la AC raíz revoca la secretaría (clave comprometida) ==="
 run revoke-secretaria
 run pending alice
-rm -rf "$PLANCIPHER_DATA"
+chmod -R u+w "$PLANCIPHER_DATA" 2>/dev/null; rm -rf "$PLANCIPHER_DATA"

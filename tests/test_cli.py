@@ -15,9 +15,10 @@ PASSWORD = "clave-del-estudiante-99"
 
 
 class CliTests(TmpDirCase):
-    def run_cli(self, *args, password=PASSWORD, debug=False):
+    def run_cli(self, *args, password=PASSWORD, debug=False, **extra_env):
         env = {**os.environ, "PYTHONPATH": str(ROOT), "PYTHONIOENCODING": "utf-8", "PLANCIPHER_DATA": str(self.dir),
-               "PLANCIPHER_SECRETARIA_PASS": SEC_PASS, "PLANCIPHER_ROOT_PASS": ROOT_PASS, "PLANCIPHER_PASSWORD": password}
+               "PLANCIPHER_SECRETARIA_PASS": SEC_PASS, "PLANCIPHER_ROOT_PASS": ROOT_PASS, "PLANCIPHER_PASSWORD": password,
+               **extra_env}
         cmd = [sys.executable, "-m", "plancipher"] + (["--debug"] if debug else []) + list(args)
         return subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8", timeout=120)
 
@@ -37,10 +38,7 @@ class CliTests(TmpDirCase):
 
         self.assertEqual(self.run_cli("grades", "alice", password="contrasena-equivocada-1").returncode, 1)
 
-        path = self.dir / "records.json"
-        data = json.loads(path.read_text())
-        data[0]["header"]["seq"] = 7
-        path.write_text(json.dumps(data))
+        self.rewrite_json("secretaria/records.json", lambda d: d[0]["header"].update(seq=7))
         r = self.run_cli("grades", "alice")
         self.assertEqual(r.returncode, 3)
         self.assertIn("RECHAZADO", r.stderr)
@@ -85,6 +83,24 @@ class CliTests(TmpDirCase):
         self.assertNotIn("CRIPTO", r.stdout)
         self.assertIn("sin cursar", r.stdout)
         self.assertEqual(self.run_cli("--trust-fingerprint", "00" * 32, "pending", "alice").returncode, 3)
+    def test_password_recovery_keeps_planning(self):
+        r = self.run_cli("register", "alice")
+        code = r.stdout.split("no se volverá a mostrar):")[1].split()[0]
+        self.assertRegex(code, r"^[A-Z2-7]{4}(-[A-Z2-7]{4}){7}$")
+        self.assertEqual(self.run_cli("add-planning", "alice", "--date", "2026-11-20", "--time", "09:00",
+                                      "--text", "Clase de Cripto").returncode, 0)
+        new = "otra-clave-del-estudiante-77"
+        r = self.run_cli("recover-password", "alice", PLANCIPHER_RECOVERY_CODE="AAAA-" + code[5:],
+                         PLANCIPHER_NEW_PASSWORD=new)
+        self.assertEqual(r.returncode, 1)  # código incorrecto: error controlado, mensaje genérico
+        self.assertIn("código de recuperación incorrectos", r.stderr)
+        r = self.run_cli("recover-password", "alice", PLANCIPHER_RECOVERY_CODE=code, PLANCIPHER_NEW_PASSWORD=new)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Código de recuperación nuevo", r.stdout)
+        self.assertEqual(self.run_cli("planning", "alice").returncode, 1)  # contraseña antigua
+        r = self.run_cli("planning", "alice", password=new)
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "2026-11-20 09:00  Clase de Cripto"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -27,7 +27,7 @@ class GradeTests(SystemCase):
 
     def test_grades_are_encrypted_on_disk(self):
         self.acad.issue_grade(self.sec, "alice", "CRIPTO", 9.0, "2026-1C")
-        raw = (self.dir / "records.json").read_text()
+        raw = (self.dir / "secretaria" / "records.json").read_text()
         self.assertNotIn("CRIPTO", raw)
         self.assertNotIn("9.0", raw)
 
@@ -46,7 +46,7 @@ class GradeTests(SystemCase):
     # --- negativas: manipulación de registros ---------------------------
     def _issue_and_mutate(self, mutate):
         self.acad.issue_grade(self.sec, "alice", "CRIPTO", 9.0, "2026-1C")
-        self.rewrite_json("records.json", lambda d: mutate(d[0]))
+        self.rewrite_json("secretaria/records.json", lambda d: mutate(d[0]))
         return self.acad.read_grades(self.alice, self.anchor)
 
     def test_modified_ciphertext_rejected(self):
@@ -68,7 +68,7 @@ class GradeTests(SystemCase):
 
     def test_record_relabelled_for_another_student_rejected(self):
         self.acad.issue_grade(self.sec, "alice", "CRIPTO", 9.0, "2026-1C")
-        self.rewrite_json("records.json", lambda d: d[0]["header"].update(student="bob"))
+        self.rewrite_json("secretaria/records.json", lambda d: d[0]["header"].update(student="bob"))
         view = self.acad.read_grades(self.bob, self.anchor)
         self.assertEqual((view.grades, len(view.rejected)), ([], 1))
 
@@ -80,14 +80,14 @@ class GradeTests(SystemCase):
             rogue_acad.publish_plan(rogue, {"degree": "x", "subjects": [{"code": "CRIPTO", "name": "x", "credits": 6}]})
             rogue_acad.enroll(rogue, "alice")  # misma clave pública del estudiante
             rogue_acad.issue_grade(rogue, "alice", "CRIPTO", 10.0, "2026-1C")
-            forged = json.loads((Path(other_dir) / "records.json").read_text())
-        (self.dir / "records.json").write_text(json.dumps(forged))
+            forged = json.loads((Path(other_dir) / "secretaria" / "records.json").read_text())
+        self.force_write("secretaria/records.json", json.dumps(forged))
         view = self.acad.read_grades(self.alice, self.anchor)  # el ancla es la secretaría REAL
         self.assertEqual((view.grades, len(view.rejected)), ([], 1))
 
     def test_duplicate_id_in_file_is_rejected(self):
         self.acad.issue_grade(self.sec, "alice", "CRIPTO", 9.0, "2026-1C")
-        self.rewrite_json("records.json", lambda d: d.append(copy.deepcopy(d[0])))
+        self.rewrite_json("secretaria/records.json", lambda d: d.append(copy.deepcopy(d[0])))
         view = self.acad.read_grades(self.alice, self.anchor)
         self.assertEqual(len(view.grades), 1)
         self.assertEqual(len(view.rejected), 1)
@@ -95,7 +95,7 @@ class GradeTests(SystemCase):
     # --- negativas: repetición / rollback -------------------------------
     def test_add_same_record_twice_is_replay(self):
         self.acad.issue_grade(self.sec, "alice", "CRIPTO", 9.0, "2026-1C")
-        record = json.loads((self.dir / "records.json").read_text())[0]
+        record = json.loads((self.dir / "secretaria" / "records.json").read_text())[0]
         with self.assertRaises(ReplayError):
             self.acad.add_record(record, self.anchor)
 
@@ -103,14 +103,14 @@ class GradeTests(SystemCase):
         self.acad.issue_grade(self.sec, "alice", "REDES", 3.0, "2026-1C")
         self.acad.issue_grade(self.sec, "alice", "REDES", 7.0, "2026-2C")
         # Un atacante con acceso a disco reordena los registros para que el antiguo quede el último.
-        self.rewrite_json("records.json", lambda d: d.reverse())
+        self.rewrite_json("secretaria/records.json", lambda d: d.reverse())
         grades = self.acad.read_grades(self.alice, self.anchor).grades
         self.assertEqual([(g["subject"], g["grade"]) for g in grades], [("REDES", 7.0)])
 
     def test_validly_signed_record_with_lower_seq_rejected_on_add(self):
         self.acad.issue_grade(self.sec, "alice", "REDES", 3.0, "2026-1C")
         self.acad.issue_grade(self.sec, "alice", "REDES", 7.0, "2026-2C")
-        records = json.loads((self.dir / "records.json").read_text())
+        records = json.loads((self.dir / "secretaria" / "records.json").read_text())
         old = copy.deepcopy(records[0])
         old["header"]["id"] = "e" * 32  # id nuevo, seq=1 < 2 ya aceptado
         body = {k: old[k] for k in ("header", "sealed_cek", "ct")}
@@ -120,7 +120,7 @@ class GradeTests(SystemCase):
 
     def test_old_record_with_stale_signature_rejected_on_add(self):
         self.acad.issue_grade(self.sec, "alice", "REDES", 3.0, "2026-1C")
-        old = json.loads((self.dir / "records.json").read_text())[0]
+        old = json.loads((self.dir / "secretaria" / "records.json").read_text())[0]
         old["header"]["id"] = "e" * 32  # cambiar el id sin re-firmar invalida la firma
         with self.assertRaises(IntegrityError):
             self.acad.add_record(old, self.anchor)
@@ -139,19 +139,20 @@ class GradeTests(SystemCase):
 
     def test_certificate_swapped_with_other_student(self):
         """Copiar el certificado (y la clave pública) de bob en alice: el CN no coincide."""
-        self.rewrite_json("users.json", lambda d: d["alice"].update(pub=d["bob"]["pub"], cert=d["bob"]["cert"]))
+        self.rewrite_json("users.json", lambda d: d["alice"].update(pub=d["bob"]["pub"]))
+        self.rewrite_json("secretaria/matriculas.json", lambda d: d.update(alice=d["bob"]))
         with self.assertRaises(IntegrityError):
             self.acad.issue_grade(self.sec, "alice", "CRIPTO", 9.0, "2026-1C")
 
     def test_tampered_or_garbage_student_certificate(self):
         def tamper(d):
-            pem = d["alice"]["cert"]
+            pem = d["alice"]
             i = len(pem) // 2
-            d["alice"]["cert"] = pem[:i] + ("A" if pem[i] != "A" else "B") + pem[i + 1:]
-        self.rewrite_json("users.json", tamper)
+            d["alice"] = pem[:i] + ("A" if pem[i] != "A" else "B") + pem[i + 1:]
+        self.rewrite_json("secretaria/matriculas.json", tamper)
         with self.assertRaises(IntegrityError):
             self.acad.issue_grade(self.sec, "alice", "CRIPTO", 9.0, "2026-1C")
-        self.rewrite_json("users.json", lambda d: d["alice"].update(cert=12345))
+        self.rewrite_json("secretaria/matriculas.json", lambda d: d.update(alice=12345))
         with self.assertRaises(IntegrityError):
             self.acad.issue_grade(self.sec, "alice", "CRIPTO", 9.0, "2026-1C")
 
@@ -161,8 +162,8 @@ class GradeTests(SystemCase):
             rogue = Secretaria.unlock(Path(other_dir), SEC_PASS)
             mallory_pub = hybrid.generate_keypair()[1]
             fake = rogue.certify_student("alice", mallory_pub)
-        self.rewrite_json("users.json", lambda d: d["alice"].update(
-            cert=fake, pub=b64e(hybrid.public_to_bytes(mallory_pub))))
+        self.rewrite_json("secretaria/matriculas.json", lambda d: d.update(alice=fake))
+        self.rewrite_json("users.json", lambda d: d["alice"].update(pub=b64e(hybrid.public_to_bytes(mallory_pub))))
         with self.assertRaises(IntegrityError):
             self.acad.issue_grade(self.sec, "alice", "CRIPTO", 9.0, "2026-1C")
 
@@ -181,7 +182,7 @@ class GradeTests(SystemCase):
     # --- plan firmado ---------------------------------------------------
     def test_plan_signature_checked(self):
         self.assertEqual(len(self.acad.load_plan(self.anchor)["subjects"]), 3)
-        self.rewrite_json("plan.json", lambda d: d["plan"]["subjects"][0].update(credits=1))
+        self.rewrite_json("secretaria/plan.json", lambda d: d["plan"]["subjects"][0].update(credits=1))
         with self.assertRaises(IntegrityError):
             self.acad.load_plan(self.anchor)
 
@@ -224,7 +225,7 @@ class SecretariaTests(TmpDirCase):
         with tempfile.TemporaryDirectory() as other:
             Secretaria.init(Path(other), SEC_PASS, FAST, root_passphrase=ROOT_PASS)
             other_cert = (Path(other) / "secretaria" / "cert.pem").read_bytes()
-        (self.dir / "secretaria" / "cert.pem").write_bytes(other_cert)
+        self.force_write("secretaria/cert.pem", other_cert)
         with self.assertRaises(IntegrityError):  # la clave descifrada no corresponde al certificado
             Secretaria.unlock(self.dir, SEC_PASS)
 
@@ -253,7 +254,7 @@ class SecretariaTests(TmpDirCase):
         with tempfile.TemporaryDirectory() as other:
             Secretaria.init(Path(other), SEC_PASS, FAST, root_passphrase=ROOT_PASS)
             for rel in ("pki/root_cert.pem", "pki/crl.pem", "secretaria/cert.pem"):
-                (self.dir / rel).write_bytes((Path(other) / rel).read_bytes())
+                self.force_write(rel, (Path(other) / rel).read_bytes())
         with self.assertRaises(IntegrityError):
             TrustAnchor.load(self.dir, expected_fingerprint=fp)
 
@@ -262,7 +263,7 @@ class SecretariaTests(TmpDirCase):
         with tempfile.TemporaryDirectory() as other:
             Secretaria.init(Path(other), SEC_PASS, FAST, root_passphrase=ROOT_PASS)
             for rel in ("secretaria/cert.pem", "secretaria/signing_key.json"):
-                (self.dir / rel).write_bytes((Path(other) / rel).read_bytes())
+                self.force_write(rel, (Path(other) / rel).read_bytes())
         with self.assertRaises(IntegrityError):  # no está emitida por NUESTRA AC raíz
             TrustAnchor.load(self.dir)
 
@@ -270,10 +271,10 @@ class SecretariaTests(TmpDirCase):
         Secretaria.init(self.dir, SEC_PASS, FAST, root_passphrase=ROOT_PASS)
         crl = self.dir / "pki" / "crl.pem"
         original = crl.read_bytes()
-        crl.write_bytes(original.replace(b"\n-----END", b"A\n-----END"))
+        self.force_write("pki/crl.pem", original.replace(b"\n-----END", b"A\n-----END"))
         with self.assertRaises(IntegrityError):
             TrustAnchor.load(self.dir)
-        crl.unlink()
+        self.force_delete("pki/crl.pem")
         with self.assertRaises(ValidationError):
             TrustAnchor.load(self.dir)
 

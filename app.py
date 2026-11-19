@@ -129,7 +129,7 @@ def student_tab() -> None:
     if session is not None:
         student_view(session)
         return
-    tab_login, tab_register = st.tabs(["Entrar", "Registrarse"])
+    tab_login, tab_register, tab_recover = st.tabs(["Entrar", "Registrarse", "¿Olvidaste la contraseña?"])
     with tab_login, st.form("login"):
         user = st.text_input("Usuario")
         password = st.text_input("Contraseña", type="password")
@@ -149,11 +149,30 @@ def student_tab() -> None:
                 st.error("Las contraseñas no coinciden")
             else:
                 try:
-                    users.register(user.strip(), password)
+                    code = users.register(user.strip(), password)
                 except PlanCipherError as exc:
                     show_error(exc)
                 else:
-                    done("Registrado. Pide a la secretaría que emita tu certificado de matrícula.")
+                    done("Registrado. Pide a la secretaría que emita tu certificado de matrícula.  \n"
+                         f"**Código de recuperación** (guárdalo, no se volverá a mostrar): `{code}`")
+    with tab_recover, st.form("recover", clear_on_submit=True):
+        st.caption("Usa el código de recuperación que se te mostró al registrarte. Tu planning y tus "
+                   "notas se conservan: solo cambia la contraseña (y se genera un código nuevo).")
+        user = st.text_input("Usuario a recuperar", key="recover_user")
+        code = st.text_input("Código de recuperación", type="password")
+        password = st.text_input("Contraseña nueva (mín. 12 caracteres)", type="password")
+        again = st.text_input("Repite la contraseña nueva", type="password")
+        if st.form_submit_button("Recuperar contraseña", type="primary"):
+            if password != again:
+                st.error("Las contraseñas no coinciden")
+            else:
+                try:
+                    _, new_code = users.recover(user.strip(), code, password, rekey=planning.rekey)
+                except PlanCipherError as exc:
+                    show_error(exc)
+                else:
+                    done("Contraseña cambiada; ya puedes entrar con la nueva. El código anterior ya no vale.  \n"
+                         f"**Código de recuperación nuevo** (guárdalo): `{new_code}`")
 
 
 def secretaria_tab() -> None:

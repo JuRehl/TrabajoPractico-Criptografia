@@ -10,7 +10,7 @@ Linux / macOS:
 ```bash
 python3 -m venv .venv && source .venv/bin/activate   # Python >= 3.10
 pip install -r requirements.txt                       # cryptography==50.0.2
-python -m unittest discover -s tests -t .             # 131 pruebas, funcionales y de ataques
+python -m unittest discover -s tests -t .             # 153 pruebas, funcionales y de ataques
 bash scripts/demo.sh                                  # demo completa con manipulaciones
 ```
 
@@ -30,17 +30,19 @@ Uso manual (los secretos se piden sin eco; `--debug` muestra algoritmos y longit
 
 ```bash
 python -m plancipher init-secretaria                  # PKI (AC raíz -> secretaría + CRL) y plan firmado
-python -m plancipher register alice
+python -m plancipher register alice                   # muestra su código de recuperación (una vez)
 python -m plancipher enroll alice                     # [secretaría] emite su certificado X.509 (matrícula)
 python -m plancipher issue-grade alice --subject CRIPTO --grade 8.5 --term 2026-1C
 python -m plancipher add-planning alice --date 2026-11-10 --time 09:00 --text "Clase de Cripto"
 python -m plancipher planning alice
 python -m plancipher grades alice                     # verifica firma + descifra
 python -m plancipher pending alice
+python -m plancipher recover-password alice           # contraseña nueva con el código de recuperación
 python -m plancipher revoke-secretaria                # [AC raíz] revoca la secretaría (CRL)
 ```
 
 Para scripts: `PLANCIPHER_PASSWORD`, `PLANCIPHER_SECRETARIA_PASS`, `PLANCIPHER_ROOT_PASS`, `PLANCIPHER_DATA`,
+`PLANCIPHER_RECOVERY_CODE`, `PLANCIPHER_NEW_PASSWORD`,
 `PLANCIPHER_TRUST_FP` (huella SHA-256 de la **AC raíz**).
 Códigos de salida: `0` OK, `1` error controlado, `3` datos **rechazados** por integridad.
 
@@ -62,7 +64,7 @@ cerrar sesión. Es una demo **local**: Streamlit no aporta TLS, por lo que no de
 
 ```
 plancipher/crypto/   solo criptografía: kdf, aead, hybrid, signing, keystore, certs, encoding
-plancipher/          lógica: auth, planning, academic (matrícula/plan/notas), secretaria, storage
+plancipher/          lógica: auth, planning, academic (matrícula/plan/notas), secretaria, storage (zonas y permisos)
 plancipher/cli.py    solo entrada/salida (CLI)
 app.py               solo entrada/salida (web Streamlit, opcional)
 tests/               unittest: crypto, auth, planning, academic (ataques), functional (casos de uso),
@@ -75,6 +77,7 @@ tests/               unittest: crypto, auth, planning, academic (ataques), funct
 |---|---|---|
 | Contraseñas | scrypt + HKDF-SHA256 | n=2^17, r=8, p=1 (~128 MiB), sal de 128 bits por usuario. Una sola ejecución de scrypt; HKDF separa el **verificador** (se guarda) de la **KEK** (no se guarda). Comparación en tiempo constante. Política: mínimo 12 caracteres y rechazo de contraseñas de diccionario (también variantes como `Password12345678`). |
 | Cifrado de datos | AES-256-GCM (AEAD) | Nonce aleatorio de 96 bits por cifrado; clave de contenido (CEK) aleatoria por registro; AAD con id y propietario/destinatario. |
+| Recuperación de contraseña | Código aleatorio de 160 bits + HKDF-SHA256 + AES-256-GCM | Se muestra una sola vez al registrarse. Con él se guarda una copia de la KEK cifrada (AAD = usuario). Al recuperar: se descifra la KEK antigua, se fija la contraseña nueva, se re-envuelven la clave privada y las CEK del planning con la KEK nueva y se emite un código nuevo (el anterior deja de valer). Mensaje genérico ante código o usuario incorrectos. HKDF basta porque el código no lo elige el usuario: 160 bits no se pueden probar por fuerza bruta. |
 | Claves de usuario | X25519 | La privada se guarda cifrada con la KEK (AES-GCM, AAD = usuario). |
 | Entrega de CEK al estudiante | ECIES: X25519 efímero + HKDF-SHA256 + AES-256-GCM | La secretaría solo necesita la clave pública del estudiante. |
 | Integridad | AES-GCM (tag) en datos privados; ECDSA en datos públicos | No se usa HMAC separado porque AEAD ya autentica. |
@@ -90,6 +93,26 @@ Cualquier tag, firma o certificado inválidos **rechaza** el dato (no se muestra
 la CLI devuelve código 3. Login con mensaje genérico, coste scrypt también para usuarios inexistentes
 y bloqueo exponencial tras 5 fallos.
 
+## Separación de accesos (borrado de datos)
+
+Lo que escribe la secretaría no lo puede borrar ni sobrescribir un estudiante. Los datos se reparten en zonas según quién los escribe:
+
+| Zona | Ficheros | Quién escribe | Protección |
+|---|---|---|---|
+| Estudiante | `data/users.json`, `data/planning.json` | El estudiante (registro, login, planning, recuperación) | Escribible |
+| Secretaría | `data/secretaria/`: `records.json` (notas), `plan.json`, `matriculas.json` (certificados de estudiante), `cert.pem`, `signing_key.json` | Solo la secretaría (con su clave de firma) | **Solo lectura** tras cada escritura |
+| AC raíz | `data/pki/`: `root_cert.pem`, `root_key.json`, `crl.pem` | Solo la AC raíz | **Solo lectura** |
+
+Tras cada escritura de la secretaría o de la raíz, los ficheros quedan en solo lectura (en Linux/macOS también el
+directorio). Borrarlos o sobrescribirlos desde el lado del estudiante falla con `PermissionError` del sistema
+operativo (`tests/test_access.py`, ATAQUE 2 de la demo). El código del estudiante nunca escribe en esas zonas. Los
+certificados de matrícula ya no están en `users.json` (que escribe el estudiante), sino en la zona de la secretaría.
+
+En un despliegue real cada zona pertenecería a un usuario distinto del sistema (o a un servidor) y los estudiantes
+solo tendrían permiso de lectura. Aquí todo corre con el mismo usuario, así que se emula con el atributo de solo
+lectura: alguien que lo quite a propósito se salta la separación. Aun así, cualquier **modificación** se sigue
+detectando por la firma y el tag; solo el borrado deliberado quedaría sin detectar.
+
 ## Ataques mitigados (probados en `tests/`)
 
 1. **Manipulación de datos en disco** (ciphertext, tag, firma, cabecera): AEAD + ECDSA → rechazo.
@@ -100,6 +123,7 @@ y bloqueo exponencial tras 5 fallos.
 6. **Escalada de privilegios**: la secretaría no es un nombre de usuario; se prueba con su clave de firma.
 7. **Secretaría falsa**: su certificado debe estar emitido por la AC raíz; sustituir toda la PKI se detecta fijando la huella de la raíz (`--trust-fingerprint`).
 8. **Clave de la secretaría comprometida**: la AC raíz la revoca (`revoke-secretaria`) y la CRL hace que todas sus firmas se rechacen.
+9. **Borrado de notas por el estudiante**: separación de accesos; la zona de la secretaría es de solo lectura para él.
 
 ## Limitaciones conocidas (para la memoria / defensa)
 
@@ -107,9 +131,11 @@ y bloqueo exponencial tras 5 fallos.
 * Los certificados de estudiante no tienen CRL propia: para "revocar" a un estudiante se re-emite su certificado o se borra.
 * Al revocar se rechaza todo lo firmado por la secretaría, también lo anterior a la revocación (no hay sellado de tiempo).
 * La lista de contraseñas comunes es corta; en producción se usaría una lista grande de contraseñas filtradas.
-* Un atacante con escritura en disco puede **borrar** el último registro (rollback por borrado) sin que se detecte;
-  se resolvería con un contador/manifiesto firmado.
+* El borrado se impide por permisos (separación de accesos), no se detecta criptográficamente: alguien que se salte
+  los permisos del sistema podría borrar el último registro sin que se note. Se resolvería además con un manifiesto
+  firmado por la secretaría (número de notas por estudiante).
 * Sin bloqueo de ficheros entre procesos concurrentes (escritura atómica, pero last-write-wins).
 * Los metadatos (usuario, `seq`, fecha de emisión, nº de entradas) no están cifrados.
 * El bloqueo por intentos revela que un usuario existe; es un compromiso explícito frente a la denegación de servicio.
-* No hay recuperación de contraseña: la KEK se deriva de ella, así que perderla implica perder el planning.
+* Recuperación de contraseña solo con el código de recuperación: si se pierden a la vez la contraseña y el código, se pierde el planning (la KEK no está en ningún otro sitio). Quien obtenga el código puede fijar una contraseña nueva, así que debe guardarse como una contraseña.
+* La recuperación re-envuelve el planning y luego guarda el usuario: un fallo entre ambas escrituras dejaría el planning con la KEK nueva sin que la contraseña nueva conste (no hay transacción entre ficheros).

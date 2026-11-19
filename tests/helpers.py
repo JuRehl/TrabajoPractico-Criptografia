@@ -1,5 +1,7 @@
 """Utilidades compartidas: parámetros scrypt rápidos SOLO para tests."""
 import json
+import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -36,12 +38,32 @@ class TmpDirCase(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.dir = Path(self._tmp.name)
 
+    def _bypass(self, path):
+        """El atacante se salta los permisos del sistema (solo lectura) de la zona de la secretaría."""
+        for d in (path.parent, path.parent.parent):
+            if d.exists():
+                os.chmod(d, stat.S_IRWXU)
+        if path.exists():
+            os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+
     def rewrite_json(self, name, fn):
-        """Aplica `fn` al JSON de un fichero de datos (simula un atacante con acceso a disco)."""
+        """Aplica `fn` al JSON de un fichero de datos (simula un atacante con acceso a disco
+        que además se salta la protección de solo lectura)."""
         path = self.dir / name
+        self._bypass(path)
         data = json.loads(path.read_text())
         fn(data)
         path.write_text(json.dumps(data))
+
+    def force_write(self, name, content):
+        path = self.dir / name
+        self._bypass(path)
+        (path.write_bytes if isinstance(content, bytes) else path.write_text)(content)
+
+    def force_delete(self, name):
+        path = self.dir / name
+        self._bypass(path)
+        path.unlink()
 
 
 class SystemCase(TmpDirCase):

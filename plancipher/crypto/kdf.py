@@ -76,5 +76,13 @@ def derive_subkeys(password: str, salt: bytes, params: KdfParams) -> tuple[bytes
     return _hkdf(master, b"plancipher/v1/auth"), _hkdf(master, b"plancipher/v1/kek")
 
 
+def derive_recovery_key(code: bytes, salt: bytes) -> bytes:
+    """Clave que protege la copia de recuperación de la KEK. El código de recuperación
+    es aleatorio de 160 bits (no lo elige el usuario), así que no hace falta un KDF
+    costoso como scrypt: con HKDF-SHA256 y una sal propia basta."""
+    log.debug("HKDF-SHA256: código de recuperación (%d bits) -> clave de 256 bits", len(code) * 8)
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=salt, info=b"plancipher/v1/recovery").derive(code)
+
+
 def constant_time_equal(a: bytes, b: bytes) -> bool:
     return hmac.compare_digest(a, b)

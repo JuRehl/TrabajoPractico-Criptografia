@@ -65,6 +65,20 @@ class WebTests(TmpDirCase):
         self.assertEqual((notes["Asignatura"][0], notes["Nota"][0]), ("CRIPTO", 8.5))
         self.assertNotIn("CRIPTO", list(pending["Código"]))
 
+    def test_password_recovery_button(self):
+        self.fill(**{"Usuario nuevo": "alice", "Contraseña (mín. 12 caracteres)": PASSWORD,
+                     "Repite la contraseña": PASSWORD})
+        self.click("Registrarse")
+        code = self.at.success[0].value.split("`")[1]
+        new = "otra-clave-del-estudiante-77"
+        self.fill(**{"Usuario a recuperar": "alice", "Código de recuperación": code,
+                     "Contraseña nueva (mín. 12 caracteres)": new, "Repite la contraseña nueva": new})
+        self.click("Recuperar contraseña")
+        self.assertIn("Contraseña cambiada", self.at.success[0].value)
+        self.fill(Usuario="alice", **{"Contraseña": new})
+        next(b for b in self.at.button if b.label == "Entrar").click().run()  # sin PKI, Notas avisa: es esperado
+        self.assertIn("Sesión de **alice**", " ".join(c.value for c in self.at.caption))
+
     def test_mismatched_passphrases_show_error(self):
         self.fill(**{"Passphrase de la AC raíz (mín. 12 caracteres)": ROOT_PASS,
                      "Repite la passphrase de la AC raíz": "otra-cosa-distinta",

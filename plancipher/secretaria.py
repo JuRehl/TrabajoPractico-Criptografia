@@ -8,7 +8,8 @@
 * Los estudiantes solo confían en la AC raíz: validan la cadena secretaría -> raíz y la
   CRL antes de aceptar cualquier firma.
 
-Ficheros:  pki/root_cert.pem, pki/root_key.json, pki/crl.pem,
+Ficheros (zona de solo lectura para el estudiante, ver storage.py):
+           pki/root_cert.pem, pki/root_key.json, pki/crl.pem,
            secretaria/cert.pem, secretaria/signing_key.json
 """
 import logging
@@ -21,7 +22,7 @@ from .crypto.encoding import b64d, b64e, canonical
 from .crypto.kdf import KdfParams
 from .errors import IntegrityError, ValidationError
 from .password_policy import is_common_password
-from .storage import JsonStore, ensure_dir
+from .storage import JsonStore, ensure_dir, write_bytes
 
 log = logging.getLogger("plancipher.secretaria")
 
@@ -126,14 +127,14 @@ class Secretaria:
 
         root_key = signing.generate_signing_key()
         root = certs.create_root(root_key)
-        JsonStore(p["root_key"]).save(keystore.protect(root_passphrase, signing.private_to_der(root_key),
+        JsonStore(p["root_key"], protect=True).save(keystore.protect(root_passphrase, signing.private_to_der(root_key),
                                                        params, ROOT_KEY_AAD))
-        p["root_cert"].write_bytes(certs.to_pem(root))
+        write_bytes(p["root_cert"], certs.to_pem(root), protect=True)
 
         key = signing.generate_signing_key()
-        JsonStore(p["sub_key"]).save(keystore.protect(passphrase, signing.private_to_der(key), params, KEY_AAD))
-        p["sub_cert"].write_bytes(certs.to_pem(certs.issue_subordinate(root_key, root, key.public_key())))
-        p["crl"].write_bytes(certs.to_pem(certs.create_crl(root_key, root)))
+        JsonStore(p["sub_key"], protect=True).save(keystore.protect(passphrase, signing.private_to_der(key), params, KEY_AAD))
+        write_bytes(p["sub_cert"], certs.to_pem(certs.issue_subordinate(root_key, root, key.public_key())), protect=True)
+        write_bytes(p["crl"], certs.to_pem(certs.create_crl(root_key, root)), protect=True)
         log.debug("PKI creada: AC raíz + AC subordinada (secretaría) + CRL vacía")
         return certs.fingerprint(root)
 
@@ -149,7 +150,7 @@ class Secretaria:
         crl = certs.load_crl(p["crl"].read_bytes(), root)
         serial = certs.verify_subordinate(p["sub_cert"].read_bytes(), root, crl).serial_number
         revoked = [r.serial_number for r in crl] + [serial]
-        p["crl"].write_bytes(certs.to_pem(certs.create_crl(root_key, root, revoked)))
+        write_bytes(p["crl"], certs.to_pem(certs.create_crl(root_key, root, revoked)), protect=True)
         return serial
 
     @classmethod
