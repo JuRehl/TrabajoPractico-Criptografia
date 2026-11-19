@@ -3,21 +3,11 @@
 Almacenamiento: scrypt(contraseña, sal) -> HKDF -> {verificador, KEK}. Solo se
 guarda el verificador; la KEK se recalcula en cada login y protege la clave
 privada X25519 del usuario.
-
-Recuperación: al registrarse se genera un código de recuperación aleatorio (160 bits)
-que se muestra una sola vez. Con él se guarda una segunda copia de la KEK cifrada
-(HKDF(código) -> AES-256-GCM). Si el usuario olvida la contraseña, el código descifra
-la KEK antigua, se fija una contraseña nueva, se vuelven a cifrar la clave privada y el
-planning con la KEK nueva y se emite un código nuevo (el anterior deja de valer).
 """
-import base64
-import binascii
 import logging
-import os
 import re
 import time
 from dataclasses import dataclass
-from typing import Callable
 
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 
@@ -36,43 +26,10 @@ MAX_FAILED = 5
 LOCK_BASE_SECONDS = 30
 LOCK_MAX_SECONDS = 900
 GENERIC_LOGIN_ERROR = "Usuario o contraseña incorrectos"
-GENERIC_RECOVERY_ERROR = "Usuario o código de recuperación incorrectos"
-RECOVERY_BYTES = 20  # 160 bits -> 32 caracteres base32 (8 grupos de 4)
 
 
 def _key_aad(username: str) -> bytes:
     return b"plancipher/v1/userkey|" + username.encode()
-
-
-def _recovery_aad(username: str) -> bytes:
-    return b"plancipher/v1/recovery|" + username.encode()
-
-
-def _format_code(raw: bytes) -> str:
-    text = base64.b32encode(raw).decode("ascii")
-    return "-".join(text[i:i + 4] for i in range(0, len(text), 4))
-
-
-def _parse_code(code: str) -> bytes:
-    """Acepta el código con o sin guiones/espacios y en minúsculas."""
-    if not isinstance(code, str):
-        raise AuthenticationError(GENERIC_RECOVERY_ERROR)
-    text = code.upper().replace("-", "").replace(" ", "")
-    try:
-        raw = base64.b32decode(text)
-    except (binascii.Error, ValueError) as exc:
-        raise AuthenticationError(GENERIC_RECOVERY_ERROR) from exc
-    if len(raw) != RECOVERY_BYTES:
-        raise AuthenticationError(GENERIC_RECOVERY_ERROR)
-    return raw
-
-
-def _new_recovery(username: str, kek: bytes) -> tuple[str, dict]:
-    """Genera un código de recuperación y la copia de la KEK cifrada con él."""
-    raw, salt = os.urandom(RECOVERY_BYTES), kdf.new_salt()
-    key = kdf.derive_recovery_key(raw, salt)
-    record = {"salt": b64e(salt), "enc_kek": b64e(aead.encrypt(key, kek, _recovery_aad(username)))}
-    return _format_code(raw), record
 
 
 @dataclass
@@ -121,8 +78,7 @@ class UserService:
         return sorted(self._all())
 
     # Registro
-    def register(self, username: str, password: str) -> str:
-        """Registra al usuario y devuelve su código de recuperación (mostrarlo UNA vez)."""
+    def register(self, username: str, password: str) -> None:
         validate_username(username)
         if username in RESERVED:
             raise ValidationError("Nombre de usuario reservado")
@@ -142,11 +98,8 @@ class UserService:
             "failed": 0,
             "locked_until": 0,
         }
-        code, users[username]["recovery"] = _new_recovery(username, kek)
         self.store.save(users)
-        log.info("Usuario '%s' registrado (scrypt n=%d, X25519, código de recuperación de %d bits)",
-                 username, self.params.n, RECOVERY_BYTES * 8)
-        return code
+        log.info("Usuario '%s' registrado (scrypt n=%d, X25519)", username, self.params.n)
 
     # Login
     def login(self, username: str, password: str) -> Session:
@@ -180,49 +133,3 @@ class UserService:
             self.store.save(users)
         log.info("Login correcto de '%s'", username)
         return Session(username, kek, priv, priv.public_key())
-
-    # Recuperación de contraseña
-    def recover(self, username: str, code: str, new_password: str,
-                rekey: Callable[[str, bytes, bytes], None] = lambda user, old, new: None) -> tuple[Session, str]:
-        """Fija una contraseña nueva usando el código de recuperación.
-
-        `rekey(usuario, kek_antigua, kek_nueva)` vuelve a envolver los datos cifrados con
-        la KEK (el planning). Se llama ANTES de guardar el usuario. Devuelve la sesión
-        nueva y el código de recuperación nuevo; el anterior deja de valer."""
-        if not isinstance(username, str):
-            raise AuthenticationError(GENERIC_RECOVERY_ERROR)
-        validate_password(username, new_password)
-        raw = _parse_code(code)
-        users = self._all()
-        rec = users.get(username)
-        if rec is None or not isinstance(rec.get("recovery"), dict):
-            raise AuthenticationError(GENERIC_RECOVERY_ERROR)  # mismo mensaje: no revela si existe
-        try:
-            key = kdf.derive_recovery_key(raw, b64d(rec["recovery"]["salt"]))
-            old_kek = aead.decrypt(key, b64d(rec["recovery"]["enc_kek"]), _recovery_aad(username))
-        except IntegrityError as exc:
-            log.warning("Recuperación fallida para '%s': código incorrecto o datos manipulados", username)
-            raise AuthenticationError(GENERIC_RECOVERY_ERROR) from exc
-        except (KeyError, TypeError) as exc:
-            raise ValidationError("Datos de recuperación malformados") from exc
-        try:
-            priv = hybrid.private_from_bytes(aead.decrypt(old_kek, b64d(rec["enc_priv"]), _key_aad(username)))
-        except IntegrityError as exc:
-            raise IntegrityError("La clave privada del usuario está manipulada") from exc
-
-        salt = kdf.new_salt()
-        verifier, kek = kdf.derive_subkeys(new_password, salt, self.params)
-        new_code, recovery = _new_recovery(username, kek)
-        rekey(username, old_kek, kek)
-        rec.update({
-            "kdf": self.params.to_dict(),
-            "salt": b64e(salt),
-            "verifier": b64e(verifier),
-            "enc_priv": b64e(aead.encrypt(kek, hybrid.private_to_bytes(priv), _key_aad(username))),
-            "recovery": recovery,
-            "failed": 0,
-            "locked_until": 0,
-        })
-        self.store.save(users)
-        log.info("Contraseña de '%s' recuperada: KEK nueva y código de recuperación renovado", username)
-        return Session(username, kek, priv, priv.public_key()), new_code

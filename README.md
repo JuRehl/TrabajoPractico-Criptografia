@@ -10,7 +10,7 @@ Linux / macOS:
 ```bash
 python3 -m venv .venv && source .venv/bin/activate   # Python >= 3.10
 pip install -r requirements.txt                       # cryptography==50.0.2
-python -m unittest discover -s tests -t .             # 153 pruebas, funcionales y de ataques
+python -m unittest discover -s tests -t .             # 138 pruebas, funcionales y de ataques
 bash scripts/demo.sh                                  # demo completa con manipulaciones
 ```
 
@@ -30,19 +30,17 @@ Uso manual (los secretos se piden sin eco; `--debug` muestra algoritmos y longit
 
 ```bash
 python -m plancipher init-secretaria                  # PKI (AC raíz -> secretaría + CRL) y plan firmado
-python -m plancipher register alice                   # muestra su código de recuperación (una vez)
+python -m plancipher register alice
 python -m plancipher enroll alice                     # [secretaría] emite su certificado X.509 (matrícula)
 python -m plancipher issue-grade alice --subject CRIPTO --grade 8.5 --term 2026-1C
 python -m plancipher add-planning alice --date 2026-11-10 --time 09:00 --text "Clase de Cripto"
 python -m plancipher planning alice
 python -m plancipher grades alice                     # verifica firma + descifra
 python -m plancipher pending alice
-python -m plancipher recover-password alice           # contraseña nueva con el código de recuperación
 python -m plancipher revoke-secretaria                # [AC raíz] revoca la secretaría (CRL)
 ```
 
 Para scripts: `PLANCIPHER_PASSWORD`, `PLANCIPHER_SECRETARIA_PASS`, `PLANCIPHER_ROOT_PASS`, `PLANCIPHER_DATA`,
-`PLANCIPHER_RECOVERY_CODE`, `PLANCIPHER_NEW_PASSWORD`,
 `PLANCIPHER_TRUST_FP` (huella SHA-256 de la **AC raíz**).
 Códigos de salida: `0` OK, `1` error controlado, `3` datos **rechazados** por integridad.
 
@@ -77,7 +75,6 @@ tests/               unittest: crypto, auth, planning, academic (ataques), funct
 |---|---|---|
 | Contraseñas | scrypt + HKDF-SHA256 | n=2^17, r=8, p=1 (~128 MiB), sal de 128 bits por usuario. Una sola ejecución de scrypt; HKDF separa el **verificador** (se guarda) de la **KEK** (no se guarda). Comparación en tiempo constante. Política: mínimo 12 caracteres y rechazo de contraseñas de diccionario (también variantes como `Password12345678`). |
 | Cifrado de datos | AES-256-GCM (AEAD) | Nonce aleatorio de 96 bits por cifrado; clave de contenido (CEK) aleatoria por registro; AAD con id y propietario/destinatario. |
-| Recuperación de contraseña | Código aleatorio de 160 bits + HKDF-SHA256 + AES-256-GCM | Se muestra una sola vez al registrarse. Con él se guarda una copia de la KEK cifrada (AAD = usuario). Al recuperar: se descifra la KEK antigua, se fija la contraseña nueva, se re-envuelven la clave privada y las CEK del planning con la KEK nueva y se emite un código nuevo (el anterior deja de valer). Mensaje genérico ante código o usuario incorrectos. HKDF basta porque el código no lo elige el usuario: 160 bits no se pueden probar por fuerza bruta. |
 | Claves de usuario | X25519 | La privada se guarda cifrada con la KEK (AES-GCM, AAD = usuario). |
 | Entrega de CEK al estudiante | ECIES: X25519 efímero + HKDF-SHA256 + AES-256-GCM | La secretaría solo necesita la clave pública del estudiante. |
 | Integridad | AES-GCM (tag) en datos privados; ECDSA en datos públicos | No se usa HMAC separado porque AEAD ya autentica. |
@@ -99,7 +96,7 @@ Lo que escribe la secretaría no lo puede borrar ni sobrescribir un estudiante. 
 
 | Zona | Ficheros | Quién escribe | Protección |
 |---|---|---|---|
-| Estudiante | `data/users.json`, `data/planning.json` | El estudiante (registro, login, planning, recuperación) | Escribible |
+| Estudiante | `data/users.json`, `data/planning.json` | El estudiante (registro, login, planning) | Escribible |
 | Secretaría | `data/secretaria/`: `records.json` (notas), `plan.json`, `matriculas.json` (certificados de estudiante), `cert.pem`, `signing_key.json` | Solo la secretaría (con su clave de firma) | **Solo lectura** tras cada escritura |
 | AC raíz | `data/pki/`: `root_cert.pem`, `root_key.json`, `crl.pem` | Solo la AC raíz | **Solo lectura** |
 
@@ -137,5 +134,4 @@ detectando por la firma y el tag; solo el borrado deliberado quedaría sin detec
 * Sin bloqueo de ficheros entre procesos concurrentes (escritura atómica, pero last-write-wins).
 * Los metadatos (usuario, `seq`, fecha de emisión, nº de entradas) no están cifrados.
 * El bloqueo por intentos revela que un usuario existe; es un compromiso explícito frente a la denegación de servicio.
-* Recuperación de contraseña solo con el código de recuperación: si se pierden a la vez la contraseña y el código, se pierde el planning (la KEK no está en ningún otro sitio). Quien obtenga el código puede fijar una contraseña nueva, así que debe guardarse como una contraseña.
-* La recuperación re-envuelve el planning y luego guarda el usuario: un fallo entre ambas escrituras dejaría el planning con la KEK nueva sin que la contraseña nueva conste (no hay transacción entre ficheros).
+* No hay recuperación de contraseña: la KEK se deriva de ella, así que perderla implica perder el planning y no poder leer las notas. Nadie, tampoco la secretaría, puede resetear la contraseña de un estudiante.

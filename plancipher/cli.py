@@ -50,9 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--grade", type=float, required=True)
     s.add_argument("--term", required=True, help="p. ej. 2026-1C")
 
-    s = sub.add_parser("register", help="registra un estudiante (muestra su código de recuperación)")
-    s.add_argument("user")
-    s = sub.add_parser("recover-password", help="fija una contraseña nueva con el código de recuperación")
+    s = sub.add_parser("register", help="registra un estudiante")
     s.add_argument("user")
     s = sub.add_parser("add-planning", help="añade una entrada cifrada al planning")
     s.add_argument("user")
@@ -105,17 +103,8 @@ def run(args) -> int:
             print(f"Nota emitida (id {rid[:8]}): cifrada para '{args.student}' y firmada.")
 
     elif args.cmd == "register":
-        code = _users(data).register(args.user, _secret("Contraseña: ", "PLANCIPHER_PASSWORD", confirm=True))
+        _users(data).register(args.user, _secret("Contraseña: ", "PLANCIPHER_PASSWORD", confirm=True))
         print(f"Usuario '{args.user}' registrado. Pide a la secretaría que emita tu certificado de matrícula.")
-        print(f"Código de recuperación (guárdalo, no se volverá a mostrar):\n  {code}")
-
-    elif args.cmd == "recover-password":
-        code = _secret("Código de recuperación: ", "PLANCIPHER_RECOVERY_CODE")
-        new_password = _secret("Contraseña nueva: ", "PLANCIPHER_NEW_PASSWORD", confirm=True)
-        planning = PlanningService(JsonStore(data / "planning.json"))
-        _, new_code = _users(data).recover(args.user, code, new_password, rekey=planning.rekey)
-        print(f"Contraseña de '{args.user}' cambiada. El código anterior ya no vale.")
-        print(f"Código de recuperación nuevo (guárdalo):\n  {new_code}")
 
     else:  
         users = _users(data)

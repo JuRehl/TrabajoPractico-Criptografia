@@ -59,26 +59,6 @@ class PlanningService:
         self.store.save(records)
         return entry_id
 
-    def rekey(self, username: str, old_kek: bytes, new_kek: bytes) -> int:
-        """Vuelve a envolver las CEK del usuario con su KEK nueva (cambio/recuperación de
-        contraseña). Los datos no se vuelven a cifrar: solo cambia la envoltura de la CEK.
-        Una entrada manipulada se deja como está (seguirá saliendo como RECHAZADA)."""
-        records, count = self.store.load([]), 0
-        for rec in records:
-            if not isinstance(rec, dict) or rec.get("owner") != username:
-                continue
-            rid = str(rec.get("id", "?"))
-            try:
-                cek = aead.decrypt(old_kek, b64d(rec["wrapped_cek"]), _aad("wrap", username, rid))
-            except (IntegrityError, ValidationError, KeyError, TypeError) as exc:
-                log.warning("Entrada de planning %s no re-envuelta: %s", rid[:8], exc)
-                continue
-            rec["wrapped_cek"] = b64e(aead.encrypt(new_kek, cek, _aad("wrap", username, rid)))
-            count += 1
-        self.store.save(records)
-        log.debug("Planning de '%s': %d CEK re-envueltas con la KEK nueva (AES-256-GCM)", username, count)
-        return count
-
     def list(self, session: Session) -> tuple[list[dict], list[str]]:
         entries, rejected = [], []
         for rec in self.store.load([]):

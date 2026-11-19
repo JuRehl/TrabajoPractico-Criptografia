@@ -38,3 +38,6 @@ data/
 *.p12
 *.pfx
 
+
+# Configuración local de Claude Code y datos de demo
+.claude/

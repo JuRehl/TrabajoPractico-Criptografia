@@ -67,8 +67,8 @@ class AccessSeparationTests(SystemCase):
         self.planning.add(session, "2026-11-21", "10:00", "Tutoría")
         self.acad.read_grades(session, self.anchor)
         self.acad.load_plan(self.anchor)
-        code = self.users.register("dave", "clave-del-cuarto-44")
-        self.users.recover("dave", code, "otra-clave-del-cuarto-55", rekey=self.planning.rekey)
+        self.users.register("dave", "clave-del-cuarto-44")
+        self.users.login("dave", "clave-del-cuarto-44")
         self.assertEqual({rel: digest(self.dir / rel) for rel in SECRETARIA_ZONE}, before)
 
     def test_secretaria_can_still_write_and_files_stay_protected(self):
